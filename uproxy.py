@@ -62,7 +62,6 @@ class uProxy:
 
     @staticmethod
     def _get_peer_info(stream):
-        x = stream.get_extra_info('peername')
         mv = memoryview(stream.get_extra_info('peername'))
         _, port, a, b, c, d = struct.unpack('!HHBBBB', mv[0:8])
         ip = '%u.%u.%u.%u' % (a, b, c, d)
@@ -73,7 +72,7 @@ class uProxy:
         """
         Modified from `uasyncio.open_connection()`
         - Add `local_addr` parameter
-        TODO: Remove this function once micropython adds outbound bind
+        TODO: Remove this function once micropython adds ip binding
         """
         from errno import EINPROGRESS
         import socket
@@ -106,7 +105,7 @@ class uProxy:
     async def _start_server(cb, host, port, backlog=5, ssl=None):
         """
         Modified from `uasyncio.start_server()`
-        - Attach socket to `Server' instance
+        - Add socket to `Server' instance
         """
         import socket
 
@@ -140,9 +139,11 @@ class uProxy:
 
     def limit_connections(self):
         """
-        Disable/Enable socket polling in proxy server if the number of
-        concurrent connections exceed limit.
-        Disable polling will make server not to accept new connections.
+        Temporarily disable socket polling if number of concurrent connections
+        exceed a certain limit, so that server's listening socket will no longer
+        accept new connections.
+        This will cause some connection loss errors. More error handling is
+        needed.
         """
         if not self.maxconns or self.maxconns<=0:
             return
@@ -167,7 +168,7 @@ class uProxy:
 
     async def accept_connection(self, creader, cwriter):
         """
-        Non-blocking version of connection.accept()
+        Non-blocking version of `connection.accept()`
         Runs on a new task
         @creader: stream reader of client socket
         @cwriter: stream writer of client socket
@@ -217,8 +218,8 @@ class uProxy:
 
     async def _CONNECT(self, creader, cwriter):
         """
-        Handle CONNECT command with poll()
-        NOTE: Doesn't work with CPython's asyncio
+        Handle CONNECT command with `poll()`
+        NOTE: Only works with MicroPython's asyncio
         """
         task = asyncio.current_task()
 

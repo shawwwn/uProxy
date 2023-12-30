@@ -6,13 +6,9 @@ import asyncio
 import argparse
 import uproxy
 
-#
-# Monkey patch - START
-#
-
 async def readinto(self, buf):
     """
-    Polyfil of `asyncio.StreamWriter.readinto()`
+    Polyfil for MicroPython's `asyncio.StreamWriter.readinto()`
     """
     l = len(buf)
     b = await self.read(l)
@@ -21,49 +17,49 @@ async def readinto(self, buf):
     # buf[lb:lb+1] = b'\0'
     return len(b)
 
+# monkey-patch
 asyncio.StreamReader.readinto = readinto
 
 
-@staticmethod
 def _get_peer_info(stream):
     """
-    Polyfil of `uproxy.uProxy._get_peer_info`
+    Polyfil for MicroPython's `get_peer_info()`
     @return: (ip, port)
     """
     return stream._transport.get_extra_info('peername')
 
-uproxy.uProxy._get_peer_info = _get_peer_info
+# monkey-patch
+uproxy.uProxy._get_peer_info = staticmethod(_get_peer_info)
 
 
-@staticmethod
-def _open_connection(host, port, ssl=None, server_hostname=None, local_addr=None):
+async def _open_connection(host, port, ssl=None, server_hostname=None, local_addr=None):
     """
-    Bind to ip
+    Enable IP binding for outgoing connections
     """
     local_addr = (local_addr, 0) if local_addr else None
-    return asyncio.open_connection(host=host, port=port, ssl=ssl, server_hostname=server_hostname, local_addr=local_addr)
+    return await asyncio.open_connection(host=host, port=port, ssl=ssl, server_hostname=server_hostname, local_addr=local_addr)
 
-uproxy.uProxy._open_connection = _open_connection
+# monkey-patch
+uproxy.uProxy._open_connection = staticmethod(_open_connection)
 
 
-@staticmethod
 async def _start_server(callback, host, port, backlog=5, ssl=None):
     """
-    Workability subjects to asyncio version
-    Current working asyncio is based on PEP 3156
+    Save socket to `Server` instance
     """
     server = await asyncio.start_server(client_connected_cb=callback, host=host, port=port, backlog=backlog, ssl=ssl)
     server.s = server._sockets[0] # save listener socket
     return server
 
-uproxy.uProxy._start_server = _start_server
+# monkey-patch
+uproxy.uProxy._start_server = staticmethod(_start_server)
 
 
 async def _CONNECT_fast(self, creader, cwriter):
     """
     Handle CONNECT command with a go-style coroutine
-    NOTE: This handler function is much faster than the poll() based one
-    used in uproxy.py but will consume twice the RAM.
+    NOTE: This function is much faster than the one used in Micropython version
+    of 'uproxy.py,' but will consume twice the RAM.
     This function can also work in MicroPython.
     """
     task = asyncio.current_task()
@@ -100,9 +96,10 @@ async def _CONNECT_fast(self, creader, cwriter):
                 n = await asyncio.wait_for(reader.readinto(mv), timeout=self.timeout)
             except asyncio.TimeoutError:
                 n = -1
-            # except: # EBADF
-            #   self.loglevel>=uproxy.LOG_INFO and print("  EBADF")
-            #   break
+            except Exception as err: # EBADF
+                raise err
+                self.loglevel>=uproxy.LOG_INFO and print("  EBADF")
+                break
             if n>0:
                 try:
                     writer.write(mv[:n])
@@ -124,21 +121,21 @@ async def _CONNECT_fast(self, creader, cwriter):
     results = await asyncio.gather(task_c2r, task_r2c, return_exceptions=False)
     self.loglevel>=uproxy.LOG_DEBUG and print("  close, %d bytes transferred" % sum(results))
 
+# monkey-patch
 uproxy.uProxy._CONNECT = _CONNECT_fast
 
 
 def limit_connections(self):
     """
-    Workability subjects to asyncio version
-    Current working asyncio is based on PEP 3156
+    Compatible with CPython's asyncio
     """
     if not self.maxconns or self.maxconns<=0:
         return
     elif self._conns>=self.maxconns:
         if self._polling:
             try:
-                # first `_selector` is `asyncio.selector_events.BaseSelectorEventLoop` with data and callback
-                # second `_selector` is raw `epoll()` selector
+                # first `._selector` is `asyncio.selector_events.BaseSelectorEventLoop` with data and callback
+                # second `._selector` is a raw `epoll()` selector
                 self._server._loop._selector._selector.modify(self._server.s.fileno(), 0)
             except:
                 pass
@@ -155,14 +152,8 @@ def limit_connections(self):
                 self.loglevel>=uproxy.LOG_INFO and print("enable polling")
                 self._polling = True
 
+# monkey-patch
 uproxy.uProxy.limit_connections = limit_connections
-
-#
-# Monkey patch - END
-#
-
-
-
 
 
 
@@ -182,4 +173,5 @@ if __name__== "__main__":
                 bufsize=args.bufsize, maxconns=args.maxconns, backlog=args.backlog, \
                 timeout=args.backlog, loglevel=args.loglevel)
     asyncio.run(proxy.run())
+
     print("done")
