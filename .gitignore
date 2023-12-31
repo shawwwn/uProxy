@@ -1,3 +1,7 @@
+test.py
+uasyncio/
+asyncio/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
