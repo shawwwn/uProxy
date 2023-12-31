@@ -1,10 +1,11 @@
 #!/usr/bin/env micropython
-# uProxy - an minimal, memory-efficient HTTP/HTTPS proxy server made for
-# MicroPython
+# uProxy - an minimal, memory-efficient HTTP/HTTPS proxy server made for MicroPython
 # Copyright (c) 2023 Shawwwn <shawwwn1@gmail.com>
 # License: MIT
-# > This script does NOT work in CPython
+#
+# > MicroPython only!
 # > For CPython-compatible uProxy, refer to `cproxy.py`
+#
 import select
 try:
     import uasyncio as asyncio
@@ -49,7 +50,7 @@ def _open_connection(host, port, ssl=None, server_hostname=None, local_addr=None
     yield asyncio.core._io_queue.queue_write(s)
     return ss, ss
 
-async def _start_server(cb, host, port, backlog=10, ssl=None):
+async def _start_server(cb, host, port, backlog=100, ssl=None):
     """
     Adapted from `uasyncio.start_server()`
     - Attach socket object to `Server' class
@@ -160,14 +161,15 @@ class uProxy:
     """
 
     def __init__(self, ip='0.0.0.0', port=8765, bind=None, \
-                bufsize=4096, maxconns=0, backlog=5, timeout=30, \
-                loglevel=LOG_INFO):
+                bufsize=8192, maxconns=0, backlog=100, timeout=30, \
+                ssl=None, loglevel=LOG_INFO):
         self.ip = ip
         self.port = port
         self.bind = bind
         self.bufsize = bufsize
         self.maxconns = maxconns
         self.backlog = backlog
+        self.ssl = None                 # SSLContext
         self.loglevel = loglevel        # 0-silent, 1-normal, 2-debug
         self.timeout = timeout          # seconds
         self._server = None
@@ -176,7 +178,7 @@ class uProxy:
         self._polling = True            # server socket polling availability
 
     async def run(self):
-        self._server = await _start_server(self._accept_conn, self.ip, self.port, backlog=self.backlog)
+        self._server = await _start_server(self._accept_conn, self.ip, self.port, backlog=self.backlog, ssl=self.ssl)
         self.loglevel>=LOG_INFO and print("Listening on %s:%d" % (self.ip, self.port))
         await self._server.wait_closed()
 

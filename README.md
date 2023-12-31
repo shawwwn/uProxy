@@ -1,6 +1,6 @@
-# uProxy
-A minimal, memory-efficient HTTP/HTTPS proxy server designed to run in some of the most memory-constraint environments such as inside an MCU.\
-Originally written for MicroPython, but made compatible with CPython.
+# µProxy
+A minimal, memory-efficient HTTP/HTTPS proxy server designed to run in memory-constraint environments.\
+Originally written for MicroPython, now compatible with CPython.
 
 ## Usage (MicroPython):
 
@@ -14,10 +14,15 @@ asyncio.run(proxy.run())
 ## Usage (CPython):
 
 `cproxy.py` is a CPython-compatible wrapper of `uproxy.py` for running uproxy in console.
+
 ```
-cproxy.py [-h] [--ip IP] [--port PORT] [--bufsize BUFSIZE] [--maxconns N] [--backlog M] [--timeout TIMEOUT]
-                 [--loglevel LOGLEVEL] [--bind BIND]
+cproxy.py [-h] [-v] [--ip IP] [--port PORT] [--bind BIND]
+          [--bufsize BUFSIZE] [--maxconns N] [--backlog M]
+          [--timeout TIMEOUT] [--loglevel LOGLEVEL]
 ```
+
+See [next section](#api-docs) for parameter usage.
+
 ```console
 $ python3 cproxy.py --ip 0.0.0.0 --port 8765
 Listening on 0.0.0.0:8765
@@ -27,6 +32,7 @@ CONNECT 192.168.1.230:54315     ==>     www.google.com:443
 ```
 
 Alternatively, to use `cproxy.py` in code:
+
 ```py
 import asyncio
 import cproxy
@@ -36,18 +42,19 @@ asyncio.run(proxy.run())
 
 ## API docs:
 
-* **`uproxy.uProxy(ip, port, bind, bufsize, maxconns, backlog, timeout, loglevel)`**
+* **`uproxy.uProxy(ip, port, bind, bufsize, maxconns, backlog, timeout, loglevel, ssl)`**
 
   Initialize proxy server
 
-  * **ip** - server ip [0.0.0.0]
-  * **port** - server port [8765]
-  * **bind** - ip address for outgoing connections to bind to [None]
-  * **bufsize** - buffer size of each connection, in bytes [4096]
-  * **maxconns** - max number of ***accepted*** connections server can handle, 0 to disable [0]
-  * **backlog** - max number of ***unaccepted*** connections waiting to be processed [5]
-  * **timeout** - connection timeout, in seconds [30]
-  * **loglevel** - log level (0-quiet, 1-info, 2-debug) [1]
+  * **ip** - server ip [default: 0.0.0.0]
+  * **port** - server port [default: 8765]
+  * **bind** - ip address for outgoing connections to bind to [default: None]
+  * **bufsize** - buffer size of each connection, in bytes [default: 8192]
+  * **maxconns** - max number of ***accepted*** connections server can handle, 0 to disable [default: 0]
+  * **backlog** - max number of ***unaccepted*** connections waiting to be processed [default: 100]
+  * **timeout** - connection timeout, in seconds [default: 30]
+  * **loglevel** - log level (0-quiet, 1-info, 2-debug) [default: 1]
+  * **ssl** - a SSLContext object to start a HTTPS server [default: None]
 
 * **`uProxy.run()`**
 
@@ -74,4 +81,4 @@ asyncio.run(proxy.run())
 ## Todo:
 - [ ] Authentication
 - [ ] Forward to upstream proxy
-- [ ] HTTPS server
+- [X] HTTPS server

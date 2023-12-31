@@ -2,8 +2,10 @@
 # A CPython wrapper for uProxy
 # Copyright (c) 2023 Shawwwn <shawwwn1@gmail.com>
 # License: MIT
-# > This script does NOT work in MicroPython
+#
+# > CPython only!
 # > For MicroPython-compatible uProxy, refer to `uproxy.py`
+#
 import asyncio
 import argparse
 import uproxy
@@ -29,7 +31,7 @@ async def _open_connection(host, port, ssl=None, server_hostname=None, local_add
     return await asyncio.open_connection(host=host, port=port, ssl=ssl, server_hostname=server_hostname, local_addr=local_addr)
 uproxy._open_connection = _open_connection
 
-async def _start_server(callback, host, port, backlog=10, ssl=None):
+async def _start_server(callback, host, port, backlog=100, ssl=None):
     server = await asyncio.start_server(client_connected_cb=callback, host=host, port=port, backlog=backlog, ssl=ssl)
     server.s = server._sockets[0]
     return server
@@ -115,10 +117,11 @@ class uProxy(uproxy.uProxy):
 
 if __name__== "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument('-v', '--version', action='version', version='uProxy %0.1f' % uproxy.VERSION)
     parser.add_argument('--ip', help="server ip [%(default)s]", default='0.0.0.0', type=str)
     parser.add_argument('--port', help="server port [%(default)s]", default=8765, type=int)
     parser.add_argument('--bind', help="ip address for outgoing connections to bind to [%(default)s]", default=None, type=str)
-    parser.add_argument('--bufsize', help="buffer size of each connection, in bytes [%(default)s]", default=4096, type=int)
+    parser.add_argument('--bufsize', help="buffer size of each connection, in bytes [%(default)s]", default=8192, type=int)
     parser.add_argument('--maxconns', help="max number of accepted connections server can handle, 0 to disable [%(default)s]", metavar='N', default=0, type=int)
     parser.add_argument('--backlog', help="max number of unaccepted connections waiting to be processed [%(default)s]", metavar='M', default=100, type=int)
     parser.add_argument('--timeout', help="connection timeout, in seconds [%(default)s]", default=30, type=int)
