@@ -162,20 +162,20 @@ class uProxy:
 
     def __init__(self, ip='0.0.0.0', port=8765, bind=None, \
                 bufsize=8192, maxconns=0, backlog=100, timeout=30, \
-                ssl=None, loglevel=LOG_INFO):
+                ssl=None, loglevel=LOG_INFO, acl_callback=None):
         self.ip = ip
         self.port = port
         self.bind = bind
         self.bufsize = bufsize
         self.maxconns = maxconns
         self.backlog = backlog
-        self.ssl = None                 # SSLContext
-        self.loglevel = loglevel        # 0-silent, 1-normal, 2-debug
-        self.timeout = timeout          # seconds
+        self.ssl = None                   # SSLContext
+        self.loglevel = loglevel          # 0-silent, 1-normal, 2-debug
+        self.timeout = timeout            # seconds
         self._server = None
-        self.acl_callback = None
-        self._conns = 0                 # current connection count
-        self._polling = True            # server socket polling availability
+        self.acl_callback = acl_callback
+        self._conns = 0                   # current connection count
+        self._polling = True              # server socket polling availability
 
     async def run(self):
         self._server = await _start_server(self._accept_conn, self.ip, self.port, backlog=self.backlog, ssl=self.ssl)
@@ -244,7 +244,7 @@ class uProxy:
 
         # access control
         # tip: task object can be accessed inside acl function
-        if self.acl_callback and not acl_callback(src_ip, src_port, dst_ip, dst_port):
+        if self.acl_callback and not self.acl_callback(src_ip, src_port, dst_ip, dst_port):
             await ss_ensure_close(cw)
             self._log(LOG_INFO, "BLOCK %s:%d --> %s:%d" % (src_ip, src_port, dst_ip, dst_port))
             return

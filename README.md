@@ -55,6 +55,7 @@ asyncio.run(proxy.run())
   * **timeout** - connection timeout, in seconds [default: 30]
   * **loglevel** - log level (0-quiet, 1-info, 2-debug) [default: 1]
   * **ssl** - a SSLContext object to start a HTTPS server [default: None]
+  * **acl_callback** - access control callback function [default: None]
 
 * **`uProxy.run()`**
 
@@ -63,10 +64,9 @@ asyncio.run(proxy.run())
 
 * **`uProxy.acl_callback`**
 
-  The access control callback function takes a 4-tuple input, they are source ip/port, destination ip/port.\
-  Default value `None` means always allow all connection to pass.\
-  It's recommended to set this property right after the creation of `uProxy` instance.\
-  Return `True` to allow current connection to pass, return `False` to block it.
+  The access control callback function takes a 4-tuple input (source ip/port and destination ip/port).\
+  Return `True` to allow current connection to pass, return `False` to block it.\
+  Default value `None` means always allow all connection to pass.
   ```py
   def acl_callback(src_ip: str, src_port: int, dst_ip: str, dst_port: int) -> bool
   ```
