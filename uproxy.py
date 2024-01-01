@@ -193,14 +193,15 @@ class uProxy:
         Doing so will generate some connection loss errors, but nothing too
         serious.
         """
+        return
         if not self.maxconns or self.maxconns<=0:
             return
         elif self._conns>=self.maxconns and self._polling:
-            asyncio.core._io_queue.poller.modify(self._server.s, 0)
+            asyncio.core._io_queue.poller.unregister(self._server.s)
             self._log(LOG_DEBUG, "polling disabled")
             self._polling = False
         elif self._conns<self.maxconns and not self._polling:
-            asyncio.core._io_queue.poller.modify(self._server.s, 1) # select.POLLIN=1
+            asyncio.core._io_queue.poller.register(self._server.s)
             self._log(LOG_DEBUG, "polling enabled")
             self._polling = True
 
@@ -268,6 +269,7 @@ class uProxy:
         """
         task = asyncio.current_task()
         bytecnt = 0
+        rw = rr = None
 
         try:
             # remote reader, remote writer
@@ -342,6 +344,7 @@ class uProxy:
         """
         task = asyncio.current_task()
         bytecnt = 0
+        rw = rr = None
 
         try:
             # remote reader, remote writer

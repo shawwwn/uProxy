@@ -48,11 +48,11 @@ class uProxy(uproxy.uProxy):
         if not self.maxconns or self.maxconns<=0:
             return
         elif self._conns>=self.maxconns and self._polling:
-            self._server._loop._selector._selector.modify(self._server.s.fileno(), 0)
+            self._server._loop._selector._selector.unregister(self._server.s.fileno())
             self._log(uproxy.LOG_DEBUG, "polling disabled")
             self._polling = False
         elif self._conns<self.maxconns and not self._polling:
-            self._server._loop._selector._selector.modify(self._server.s.fileno(), self._server._loop._selector._EVENT_READ)
+            self._server._loop._selector._selector.register(self._server.s.fileno())
             self._log(uproxy.LOG_DEBUG, "polling enabled")
             self._polling = True
 
