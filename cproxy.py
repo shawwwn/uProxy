@@ -37,6 +37,13 @@ async def _start_server(callback, host, port, backlog=100, ssl=None):
     return server
 uproxy._start_server = _start_server
 
+def b64(text, enc=True):
+    from base64 import b64encode, b64decode
+    if enc:
+        return b64encode(text.encode("ascii"))
+    else:
+        return b64decode(text.encode("ascii"))
+uproxy.b64 = b64
 
 
 class uProxy(uproxy.uProxy):
@@ -70,12 +77,15 @@ class uProxy(uproxy.uProxy):
             # remote reader, remote writer
             rr, rw = await _open_connection(task.dst_domain, task.dst_port, local_addr=self.bind)
 
-            # exhaust socket input before opening a new connection
+            is_auth = not self.auth
             while line := await cr.readline():
                 bytecnt += len(line)
+                is_auth |= self._authorize(line)
                 if line == b'\r\n':
                     break
 
+            if not is_auth:
+                raise Exception('Unauthorized')
             bytecnt += await uproxy.send_http_response(cw, 200, b'Connection established', [b'Proxy-Agent: uProxy/%0.1f' % uproxy.VERSION])
 
         except Exception as err:
@@ -126,12 +136,13 @@ if __name__== "__main__":
     parser.add_argument('--backlog', help="max number of unaccepted connections waiting to be processed [%(default)s]", metavar='M', default=100, type=int)
     parser.add_argument('--timeout', help="connection timeout, in seconds [%(default)s]", default=30, type=int)
     parser.add_argument('--loglevel', help="log level (0-quiet, 1-info, 2-debug) [%(default)s]", default=1, type=int)
+    parser.add_argument('--auth', help="a username:password pair for server authentication [%(default)s]", default=None, type=str)
     args = parser.parse_args()
 
     proxy = uProxy(ip=args.ip, port=args.port, bind=args.bind, \
                 bufsize=args.bufsize, maxconns=args.maxconns, \
                 backlog=args.backlog, timeout=args.timeout, \
-                loglevel=args.loglevel)
+                loglevel=args.loglevel, auth=args.auth)
     asyncio.run(proxy.run())
 
     print("done")

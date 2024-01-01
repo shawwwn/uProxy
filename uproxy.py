@@ -153,7 +153,17 @@ async def ss_ensure_close(ss):
     except:
         pass
 
-
+def b64(text, enc=True):
+    """
+    Turn text into base64 encoding, vice versa
+    @text: username:password
+    @enc: True to encode, False to decode
+    """
+    from ubinascii import b2a_base64, a2b_base64
+    if enc:
+        return b2a_base64(text)[:-1]
+    else:
+        return a2b_base64(text)[:-1]
 
 class uProxy:
     """
@@ -162,7 +172,7 @@ class uProxy:
 
     def __init__(self, ip='0.0.0.0', port=8765, bind=None, \
                 bufsize=8192, maxconns=0, backlog=100, timeout=30, \
-                ssl=None, loglevel=LOG_INFO, acl_callback=None):
+                ssl=None, loglevel=LOG_INFO, acl_callback=None, auth=None):
         self.ip = ip
         self.port = port
         self.bind = bind
@@ -176,6 +186,7 @@ class uProxy:
         self.acl_callback = acl_callback
         self._conns = 0                   # current connection count
         self._polling = True              # server socket polling availability
+        self.auth = b'Basic '+b64(auth, True) if auth else None
 
     async def run(self):
         self._server = await _start_server(self._accept_conn, self.ip, self.port, backlog=self.backlog, ssl=self.ssl)
@@ -204,6 +215,16 @@ class uProxy:
             asyncio.core._io_queue.poller.register(self._server.s)
             self._log(LOG_DEBUG, "polling enabled")
             self._polling = True
+
+    def _authorize(self, line):
+        """
+        Check whether the incoming http header is authorized
+        @line is a line from http headers
+        """
+        if self.auth and line:
+            if line[20:].strip() == self.auth:
+                return True
+        return False
 
     async def _accept_conn(self, cr, cw):
         """
@@ -275,18 +296,21 @@ class uProxy:
             # remote reader, remote writer
             rr, rw = await _open_connection(task.dst_domain, task.dst_port, local_addr=self.bind)
 
-            # exhaust socket input before opening a new connection
+            is_auth = not self.auth
             while line := await cr.readline():
                 bytecnt += len(line)
+                is_auth |= self._authorize(line)
                 if line == b'\r\n':
                     break
 
+            if not is_auth:
+                raise Exception('Unauthorized')
             bytecnt += await send_http_response(cw, 200, b'Connection established', [b'Proxy-Agent: uProxy/%0.1f' % VERSION])
 
         except Exception as err:
             self._log(LOG_INFO, "  error, %s" % repr(err))
-            ss_ensure_close(rw)
-            ss_ensure_close(cw)
+            await ss_ensure_close(rw)
+            await ss_ensure_close(cw)
             return bytecnt
 
         pobj = select.poll()
@@ -334,8 +358,8 @@ class uProxy:
                 break
             await asyncio.sleep(0)
 
-        ss_ensure_close(cw)
-        ss_ensure_close(cw)
+        await ss_ensure_close(cw)
+        await ss_ensure_close(cw)
         return bytecnt
 
     async def _CMD(self, cr, cw):
@@ -357,16 +381,17 @@ class uProxy:
             bytecnt += len(header)
 
             # send rest headers
+            is_auth = not self.auth
             while line := await cr.readline():
-                # strip proxy header
-                if line[:6] == b'Proxy-':
-                    line = line[6:]
+                is_auth |= self._authorize(line)
+                line = line[6:] if line[:6] == b'Proxy-' else line
                 rw.write(line)
                 bytecnt += len(line)
-                # last line
-                if line == b'\r\n':
+                if line == b'\r\n': # last line
                     break
             await rw.drain()
+            if not is_auth:
+                raise Exception('Unauthorized')
             self._log(LOG_DEBUG, "  send %d bytes" % bytecnt)
 
         except Exception as err:

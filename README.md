@@ -19,6 +19,7 @@ asyncio.run(proxy.run())
 cproxy.py [-h] [-v] [--ip IP] [--port PORT] [--bind BIND]
           [--bufsize BUFSIZE] [--maxconns N] [--backlog M]
           [--timeout TIMEOUT] [--loglevel LOGLEVEL]
+          [--auth AUTH]
 ```
 
 See [next section](#api-docs) for parameter usage.
@@ -56,6 +57,7 @@ asyncio.run(proxy.run())
   * **loglevel** - log level (0-quiet, 1-info, 2-debug) [default: 1]
   * **ssl** - a SSLContext object to start a HTTPS server [default: None]
   * **acl_callback** - access control callback function [default: None]
+  * **auth** - a 'user:password' pair that clients need to provide in order to authenticate with server [default: None]
 
 * **`uProxy.run()`**
 
@@ -79,6 +81,6 @@ asyncio.run(proxy.run())
 + For detail usage, please refer to `examples/`
 
 ## Todo:
-- [ ] Authentication
+- [X] Authorization
 - [ ] Forward to upstream proxy
 - [X] HTTPS server
