@@ -6,7 +6,6 @@
 # > MicroPython only!
 # > For CPython-compatible uProxy, refer to `cproxy.py`
 #
-import select
 try:
     import uasyncio as asyncio
 except:
@@ -165,6 +164,8 @@ def b64(text, enc=True):
     else:
         return a2b_base64(text)[:-1]
 
+
+
 class uProxy:
     """
     Proxy Server
@@ -190,7 +191,7 @@ class uProxy:
 
     async def run(self):
         self._server = await _start_server(self._accept_conn, self.ip, self.port, backlog=self.backlog, ssl=self.ssl)
-        self.loglevel>=LOG_INFO and print("Listening on %s:%d" % (self.ip, self.port))
+        self._log(LOG_INFO, "Listening on %s:%d" % (self.ip, self.port))
         await self._server.wait_closed()
 
     def _log(self, lvl, msg):
@@ -233,7 +234,6 @@ class uProxy:
         @cr: stream reader for client socket
         @cw: stream writer for client socket
         """
-        bytecnt = 0
         self._conns += 1
         self._limit_conns()
 
@@ -243,8 +243,7 @@ class uProxy:
         try:
             header = await cr.readline()
             if not header:
-                raise
-            bytecnt += len(header)
+                raise Exception("Empty Response")
         except Exception as err:
             self._log(LOG_INFO, "  error, %s" % repr(err))
             await ss_ensure_close(cw)
@@ -275,133 +274,120 @@ class uProxy:
 
         # serve command
         if method==b'CONNECT':
-            bytecnt += await self._CONNECT(cr, cw)
+            await self._CONNECT(cr, cw)
         else:
-            bytecnt += await self._CMD(cr, cw)
-        self._log(LOG_DEBUG, "  close, %s bytes transfered" % bytecnt)
+            await self._CMD(cr, cw)
+        self._log(LOG_DEBUG, "  close")
 
         self._conns -= 1
         self._limit_conns()
+
+    async def _prepare_cmd(self, cr, cw, callback):
+        """
+        Process client request's HTTP header line by line
+        Connect to dst domain, return remote socket's r/w
+        """
+        task = asyncio.current_task()
+        rr = rw = None # remote reader, remote writer
+
+        try:
+            rr, rw = await _open_connection(task.dst_domain, task.dst_port, local_addr=self.bind)
+
+            is_auth = not self.auth
+            while line := await cr.readline():
+                if self._authorize(line):
+                    is_auth = True
+                    continue
+                await callback(line, rr, rw)
+                if line == b'\r\n':
+                    break
+
+            if not is_auth:
+                raise Exception('Unauthorized')
+
+        except Exception as err:
+            self._log(LOG_INFO, "  error, %s" % repr(err))
+            await ss_ensure_close(rw)
+            await ss_ensure_close(cw)
+            return None, None
+
+        return rr, rw
 
     async def _CONNECT(self, cr, cw):
         """
         Handle CONNECT command with `poll()`
         NOTE: Only works with MicroPython asyncio
         """
-        task = asyncio.current_task()
-        bytecnt = 0
-        rw = rr = None
+        async def __cb(line, rr, rw):
+            # last line
+            if line == b'\r\n':
+                await send_http_response(cw, 200, b'Connection established', [b'Proxy-Agent: uProxy/%0.1f' % VERSION])
 
-        try:
-            # remote reader, remote writer
-            rr, rw = await _open_connection(task.dst_domain, task.dst_port, local_addr=self.bind)
+        rr, rw = await self._prepare_cmd(cr, cw, __cb)
+        if not rr:
+            return
 
-            is_auth = not self.auth
-            while line := await cr.readline():
-                bytecnt += len(line)
-                is_auth |= self._authorize(line)
-                if line == b'\r\n':
-                    break
-
-            if not is_auth:
-                raise Exception('Unauthorized')
-            bytecnt += await send_http_response(cw, 200, b'Connection established', [b'Proxy-Agent: uProxy/%0.1f' % VERSION])
-
-        except Exception as err:
-            self._log(LOG_INFO, "  error, %s" % repr(err))
-            await ss_ensure_close(rw)
-            await ss_ensure_close(cw)
-            return bytecnt
-
+        import select
         pobj = select.poll()
         pobj.register(cr.s, select.POLLIN)
         pobj.register(rr.s, select.POLLIN)
 
-        buf = bytearray(self.bufsize)
-        mv = memoryview(buf)
+        # forward data
+        try:
+            buf = bytearray(self.bufsize)
+            mv = memoryview(buf)
 
-        # forward sockets
-        finish = False
-        while True:
-            for sock, evt in pobj.ipoll(0):
-                if evt==select.POLLIN:
+            while True:
 
-                    if sock==cr.s:
-                        msg = "send"
-                        reader = cr
-                        writer = rw
-                    else:
-                        msg = "recv"
-                        reader = rr
-                        writer = cw
+                for so, evt in pobj.ipoll(0):
+                    if evt==select.POLLIN:
 
-                    try:
+                        reader = cr if so==cr.s else rr
+                        writer = rw if so==cr.s else cw
+
                         n = await asyncio.wait_for(reader.readinto(mv), timeout=self.timeout)
                         if n<=0:
-                            finish = True
                             break
                         writer.write(mv[:n])
                         await writer.drain()
-                        bytecnt += n
-                        self._log(LOG_DEBUG, "  %s %d bytes" % (msg, n))
-                    except Exception as err:
-                        finish = True
-                        self._log(LOG_INFO, "  disconnect, %s" % repr(err))
+
+                    else: # on error
                         break
 
-                else:
-                    # on error
-                    finish = True
-                    break
+                await asyncio.sleep(0)
 
-            if finish:
-                break
-            await asyncio.sleep(0)
+        except Exception as err:
+            self._log(LOG_INFO, "  disconnect, %s" % repr(err))
 
+        await ss_ensure_close(rw)
         await ss_ensure_close(cw)
-        await ss_ensure_close(cw)
-        return bytecnt
 
     async def _CMD(self, cr, cw):
         """
         Generic command handler
         """
-        task = asyncio.current_task()
-        bytecnt = 0
-        rw = rr = None
+        first = True
+        async def __cb(line, rr, rw):
+            nonlocal first
+            if first: # first line
+                first = False
+                t = asyncio.current_task()
+                cmd = b'%s %s %s' % (t.method, t.path, t.proto)
+                rw.write(cmd) # write command header
 
+            # strip proxy header
+            mv = memoryview(line)
+            rw.write(mv[6:] if mv[:6] == b'Proxy-' else mv)
+
+            if line == b'\r\n': # last line
+                await rw.drain()
+
+        rr, rw = await self._prepare_cmd(cr, cw, __cb)
+        if not rr:
+            return
+
+        # relay remote response to client
         try:
-            # remote reader, remote writer
-            rr, rw = await _open_connection(task.dst_domain, task.dst_port, local_addr=self.bind)
-
-            # assemble new command header
-            header = b'%s %s %s' % (task.method, task.path, task.proto)
-            rw.write(header)
-            # await rw.drain()
-            bytecnt += len(header)
-
-            # send rest headers
-            is_auth = not self.auth
-            while line := await cr.readline():
-                is_auth |= self._authorize(line)
-                line = line[6:] if line[:6] == b'Proxy-' else line
-                rw.write(line)
-                bytecnt += len(line)
-                if line == b'\r\n': # last line
-                    break
-            await rw.drain()
-            if not is_auth:
-                raise Exception('Unauthorized')
-            self._log(LOG_DEBUG, "  send %d bytes" % bytecnt)
-
-        except Exception as err:
-            self._log(LOG_INFO, "  error, %s" % repr(err))
-            await ss_ensure_close(rw)
-            await ss_ensure_close(cw)
-            return bytecnt
-
-        try:
-            # get response
             buf = bytearray(self.bufsize)
             mv = memoryview(buf)
 
@@ -410,8 +396,6 @@ class uProxy:
                 if n<=0:
                     break
                 cw.write(mv[:n])
-                bytecnt += n
-                self._log(LOG_DEBUG, "  recv %d bytes" % n)
                 await asyncio.sleep(0)
             await cw.drain()
 
@@ -420,4 +404,3 @@ class uProxy:
 
         await ss_ensure_close(rw)
         await ss_ensure_close(cw)
-        return bytecnt

@@ -70,37 +70,21 @@ class uProxy(uproxy.uProxy):
         'uproxy.py,' but it will consume twice the RAM.
         This function is also compatible with MicroPython.
         """
-        task = asyncio.current_task()
-        bytecnt = 0
+        async def __cb(line, rr, rw):
+            # last line
+            if line == b'\r\n':
+                await uproxy.send_http_response(cw, 200, b'Connection established', [b'Proxy-Agent: uProxy/%0.1f' % uproxy.VERSION])
 
-        try:
-            # remote reader, remote writer
-            rr, rw = await _open_connection(task.dst_domain, task.dst_port, local_addr=self.bind)
+        rr, rw = await self._prepare_cmd(cr, cw, __cb)
+        if not rr:
+            return
 
-            is_auth = not self.auth
-            while line := await cr.readline():
-                bytecnt += len(line)
-                is_auth |= self._authorize(line)
-                if line == b'\r\n':
-                    break
-
-            if not is_auth:
-                raise Exception('Unauthorized')
-            bytecnt += await uproxy.send_http_response(cw, 200, b'Connection established', [b'Proxy-Agent: uProxy/%0.1f' % uproxy.VERSION])
-
-        except Exception as err:
-            self._log(uproxy.LOG_INFO, "  error, %s" % repr(err))
-            await uproxy.ss_ensure_close(rw)
-            await uproxy.ss_ensure_close(cw)
-            return bytecnt
-
-        async def io_copy(r, w, msg):
+        async def io_copy(r, w):
             """
-            Copy data from reader to writer @w
+            Copy data from reader to writer
             """
             buf = bytearray(self.bufsize)
             mv = memoryview(buf)
-            cnt = 0
 
             try:
                 while True:
@@ -109,19 +93,14 @@ class uProxy(uproxy.uProxy):
                         break
                     w.write(mv[:n])
                     await w.drain()
-                    cnt += n
-                    self._log(uproxy.LOG_DEBUG, "  %s %d bytes" % (msg, n))
             except Exception as err:
-                self._log(uproxy.LOG_INFO, "  disconnect, %s" % repr(err))
+                self._log(uproxy.LOG_INFO, "  pipe disconnect, %s" % repr(err))
 
             await uproxy.ss_ensure_close(w)
-            self._log(uproxy.LOG_DEBUG, "  pipe close, %d bytes transferred" % cnt)
-            return cnt
 
-        task_c2r = asyncio.create_task(io_copy(cr, rw, "send"))
-        task_r2c = asyncio.create_task(io_copy(rr, cw, "recv"))
-        res = await asyncio.gather(task_c2r, task_r2c, return_exceptions=False)
-        return bytecnt+sum(res)
+        task_c2r = asyncio.create_task(io_copy(cr, rw))
+        task_r2c = asyncio.create_task(io_copy(rr, cw))
+        await asyncio.gather(task_c2r, task_r2c, return_exceptions=False)
 
 
 
