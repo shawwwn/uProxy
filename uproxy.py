@@ -90,7 +90,7 @@ def parse_http_header(line):
     """
     Parse first line of incoming HTTP request
     """
-    method, url, proto = line.split(b' ') # `proto` ends with b'\r\n'
+    method, url, proto = line.split(b' ') # `proto` ends with b'\n'
 
     # remove 'http://' prefix
     i = url.find(b'://')
@@ -115,13 +115,13 @@ async def send_http_response(ss, code, desc="", headers=[], body=None):
     """
     cnt = 0
     try:
-        l = b'HTTP/1.1 %d %s\r\n' % (code, desc)
+        l = b'HTTP/1.1 %d %s\n' % (code, desc)
         cnt += len(l)
         ss.write(l)
         for h in headers:
-            ss.write(h+b'\r\n')
+            ss.write(h+b'\n')
             cnt += len(h)+2
-        ss.write(b'\r\n')
+        ss.write(b'\n')
         cnt += 2
         await ss.drain()
     except Exception as err:
@@ -261,7 +261,7 @@ class uProxy:
         task.task_id = hex(id(task))        # str
         task.method = method                # bytes
         task.path = path                    # str
-        task.proto = proto                  # str, ends with '\r\n'
+        task.proto = proto                  # str, ends with '\n'
 
         # access control
         # tip: task object can be accessed inside acl function
@@ -295,11 +295,12 @@ class uProxy:
 
             is_auth = not self.auth
             while line := await cr.readline():
+                line = line.replace(b'\r\n', b'\n')
                 if self._authorize(line):
                     is_auth = True
                     continue
                 await callback(line, rr, rw)
-                if line == b'\r\n':
+                if line == b'\n':
                     break
 
             if not is_auth:
@@ -320,7 +321,7 @@ class uProxy:
         """
         async def __cb(line, rr, rw):
             # last line
-            if line == b'\r\n':
+            if line == b'\n':
                 await send_http_response(cw, 200, b'Connection established', [b'Proxy-Agent: uProxy/%0.1f' % VERSION])
 
         rr, rw = await self._prepare_cmd(cr, cw, __cb)
@@ -336,6 +337,7 @@ class uProxy:
         try:
             buf = bytearray(self.bufsize)
             mv = memoryview(buf)
+            done = False
 
             while True:
 
@@ -347,13 +349,17 @@ class uProxy:
 
                         n = await asyncio.wait_for(reader.readinto(mv), timeout=self.timeout)
                         if n<=0:
+                            done = True
                             break
                         writer.write(mv[:n])
                         await writer.drain()
 
                     else: # on error
+                        done = True
                         break
 
+                if done:
+                    break
                 await asyncio.sleep(0)
 
         except Exception as err:
@@ -379,7 +385,7 @@ class uProxy:
             mv = memoryview(line)
             rw.write(mv[6:] if mv[:6] == b'Proxy-' else mv)
 
-            if line == b'\r\n': # last line
+            if line == b'\n': # last line
                 await rw.drain()
 
         rr, rw = await self._prepare_cmd(cr, cw, __cb)

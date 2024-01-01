@@ -46,6 +46,7 @@ def b64(text, enc=True):
 uproxy.b64 = b64
 
 
+
 class uProxy(uproxy.uProxy):
     """
     CPython compatible class
@@ -72,7 +73,7 @@ class uProxy(uproxy.uProxy):
         """
         async def __cb(line, rr, rw):
             # last line
-            if line == b'\r\n':
+            if line == b'\n':
                 await uproxy.send_http_response(cw, 200, b'Connection established', [b'Proxy-Agent: uProxy/%0.1f' % uproxy.VERSION])
 
         rr, rw = await self._prepare_cmd(cr, cw, __cb)
@@ -85,7 +86,6 @@ class uProxy(uproxy.uProxy):
             """
             buf = bytearray(self.bufsize)
             mv = memoryview(buf)
-
             try:
                 while True:
                     n = await asyncio.wait_for(r.readinto(mv), timeout=self.timeout)
@@ -95,7 +95,6 @@ class uProxy(uproxy.uProxy):
                     await w.drain()
             except Exception as err:
                 self._log(uproxy.LOG_INFO, "  pipe disconnect, %s" % repr(err))
-
             await uproxy.ss_ensure_close(w)
 
         task_c2r = asyncio.create_task(io_copy(cr, rw))
