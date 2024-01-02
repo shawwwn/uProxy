@@ -166,9 +166,14 @@ class uProxy:
         self._log(LOG_INFO, "Listening on %s:%d" % (self.ip, self.port))
         await self._server.wait_closed()
 
-    def _log(self, lvl, msg):
+    def _log(self, lvl, msg, traceback=0):
         if self.loglevel>=LOG_DEBUG:
             t = asyncio.current_task()
+            for i in range(traceback):
+                if hasattr(t, '_parent'):
+                    t = t._parent
+                else:
+                    break
             msg = '[%u] %s' % (id(t), msg)
         self.loglevel>=lvl and print(msg)
 
@@ -243,10 +248,14 @@ class uProxy:
         pobj.register(cr.s, select.POLLIN)
         pobj.register(rr.s, select.POLLIN)
 
+        import time
+        max_ticks = None if not self.timeout else int(self.timeout*1000)
+
         try:
             buf = bytearray(self.bufsize)
             mv = memoryview(buf)
             done = False
+            start = time.ticks_ms()
 
             while True:
                 for so, evt in pobj.ipoll(0):
@@ -256,10 +265,12 @@ class uProxy:
 
                         n = await asyncio.wait_for(reader.readinto(mv), timeout=self.timeout)
                         if n<=0:
-                            done = True
+                            done = True # remote close socket
                             break
                         writer.write(mv[:n])
                         await writer.drain()
+                        if max_ticks:
+                            start = time.ticks_ms()
 
                     else: # on error
                         done = True
@@ -267,10 +278,14 @@ class uProxy:
 
                 if done:
                     break
-                await asyncio.sleep(0)
+
+                await asyncio.sleep_ms(1)
+                if max_ticks and time.ticks_diff(time.ticks_ms(), start)>max_ticks:
+                    raise asyncio.TimeoutError("custom")
 
         except Exception as err:
-            self._log(LOG_INFO, "└─disconnect, %s" % repr(err))
+            if not isinstance(err, asyncio.TimeoutError):
+                self._log(LOG_INFO, "└─disconnect, %s" % repr(err))
 
         await ss_ensure_close(rw)
         await ss_ensure_close(cw)
@@ -332,22 +347,37 @@ class uProxy:
 
         return rr, rw
 
+    def connlimiter(f):
+        """
+        decorator for `_limit_conns()`
+        """
+        async def wrapper(*args):
+            self = args[0]
+            self._conns += 1
+            await asyncio.sleep(0)
+            self._limit_conns()
+            await asyncio.sleep(0)
+            res = await f(*args)
+            self._conns -= 1
+            await asyncio.sleep(0)
+            self._limit_conns()
+            await asyncio.sleep(0)
+            return res
+        return wrapper
+
+    @connlimiter
     async def _accept_conn(self, cr, cw):
         """
         asyncio version of `connection.accept()`
         Runs on a new task
         """
         t = asyncio.current_task()
-        self._conns += 1
-        self._limit_conns()
 
         t.src_ip, t.src_port = ss_get_peername(cr)
 
         # parse proxy request cmd
         t.orig_cmd, t.method, t.dst_domain, t.dst_port, t.path, t.proto = await self._parse_cmd(cr, cw)
         if not t.orig_cmd:
-            self._conns -= 1
-            self._limit_conns()
             return
         t.dst_ip = t.dst_domain.decode() # placeholder, not a real ip
 
@@ -356,8 +386,6 @@ class uProxy:
         if self.acl_callback and not self.acl_callback(t.src_ip, t.src_port, t.dst_ip, t.dst_port):
             await ss_ensure_close(cw)
             self._log(LOG_INFO, "BLOCK %s:%d --> %s:%d" % (t.src_ip, t.src_port, t.dst_ip, t.dst_port))
-            self._conns -= 1
-            self._limit_conns()
             return
         else:
             self._log(LOG_INFO, "%s\t%s:%d\t==>\t%s:%d" % (t.method.decode(), t.src_ip, t.src_port, t.dst_ip, t.dst_port))
@@ -367,12 +395,8 @@ class uProxy:
         callback = self._CONNECT if t.method==b'CONNECT' else self._CMD
         rr, rw = await self._parse_headers(cr, cw, callback)
         if not rr:
-            self._conns -= 1
-            self._limit_conns()
             return
 
         await self._forward_data(cr,cw, rr,rw)
 
         self._log(LOG_DEBUG, "└─close")
-        self._conns -= 1
-        self._limit_conns()

@@ -8,11 +8,26 @@
 #
 import asyncio
 import argparse
+import time
 import uproxy
+
+def ticks_diff(ticks1, ticks2):
+    """
+    Micropython Polyfil
+    """
+    return ticks1 - ticks2
+time.ticks_diff = ticks_diff
+
+def ticks_ms():
+    """
+    Micropython Polyfil
+    """
+    return int(time.time_ns()/1000)
+time.ticks_ms = ticks_ms
 
 async def readinto(self, buf):
     """
-    Polyfil for MicroPython's `asyncio.StreamWriter.readinto()`
+    Micropython Polyfil
     """
     l = len(buf)
     b = await self.read(l)
@@ -84,11 +99,16 @@ class uProxy(uproxy.uProxy):
                     w.write(mv[:n])
                     await w.drain()
             except Exception as err:
-                self._log(uproxy.LOG_INFO, "├─pipe disconnect, %s" % repr(err))
+                if not isinstance(err, asyncio.TimeoutError):
+                    self._log(uproxy.LOG_INFO, "└─pipe disconnect, %s" % repr(err), traceback=1)
             await uproxy.ss_ensure_close(w)
+            self._log(uproxy.LOG_DEBUG, "└─pipe close", traceback=1)
 
+        t = asyncio.current_task()
         task_c2r = asyncio.create_task(io_copy(cr, rw))
+        task_c2r._parent = t
         task_r2c = asyncio.create_task(io_copy(rr, cw))
+        task_r2c._parent = t
         await asyncio.gather(task_c2r, task_r2c, return_exceptions=False)
 
 

@@ -8,5 +8,5 @@
 import uasyncio as asyncio
 import uproxy
 
-proxy = uproxy.uProxy(ip='0.0.0.0', port=8765, maxconns=10, backlog=5, bufsize=512, timeout=15, loglevel=0)
+proxy = uproxy.uProxy(ip='0.0.0.0', port=8765, maxconns=10, backlog=5, bufsize=512, timeout=5, loglevel=0)
 asyncio.run(proxy.run())
