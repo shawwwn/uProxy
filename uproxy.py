@@ -180,7 +180,6 @@ class uProxy:
         Doing so will generate some connection loss errors, but nothing too
         serious.
         """
-        return
         if not self.maxconns or self.maxconns<=0:
             return
         elif self._conns>=self.maxconns and self._polling:
@@ -347,6 +346,8 @@ class uProxy:
         # parse proxy request cmd
         t.orig_cmd, t.method, t.dst_domain, t.dst_port, t.path, t.proto = await self._parse_cmd(cr, cw)
         if not t.orig_cmd:
+            self._conns -= 1
+            self._limit_conns()
             return
         t.dst_ip = t.dst_domain.decode() # placeholder, not a real ip
 
@@ -355,6 +356,8 @@ class uProxy:
         if self.acl_callback and not self.acl_callback(t.src_ip, t.src_port, t.dst_ip, t.dst_port):
             await ss_ensure_close(cw)
             self._log(LOG_INFO, "BLOCK %s:%d --> %s:%d" % (t.src_ip, t.src_port, t.dst_ip, t.dst_port))
+            self._conns -= 1
+            self._limit_conns()
             return
         else:
             self._log(LOG_INFO, "%s\t%s:%d\t==>\t%s:%d" % (t.method.decode(), t.src_ip, t.src_port, t.dst_ip, t.dst_port))
@@ -364,6 +367,8 @@ class uProxy:
         callback = self._CONNECT if t.method==b'CONNECT' else self._CMD
         rr, rw = await self._parse_headers(cr, cw, callback)
         if not rr:
+            self._conns -= 1
+            self._limit_conns()
             return
 
         await self._forward_data(cr,cw, rr,rw)
