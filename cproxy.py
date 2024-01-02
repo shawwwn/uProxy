@@ -64,25 +64,15 @@ class uProxy(uproxy.uProxy):
             self._log(uproxy.LOG_DEBUG, "polling enabled")
             self._polling = True
 
-    async def _CONNECT(self, cr, cw):
+    async def _forward_data(self, cr,cw, rr,rw):
         """
-        Handle CONNECT command with a go-style coroutine
-        NOTE: This function is much faster than the one used in Micropython's
-        'uproxy.py,' but it will consume twice the RAM.
-        This function is also compatible with MicroPython.
+        This function is much faster than the default
+        method but will consume twice the memory.
+        Compatible with MicroPython.
         """
-        async def __cb(line, rr, rw):
-            # last line
-            if line == b'\n':
-                await uproxy.send_http_response(cw, 200, b'Connection established', [b'Proxy-Agent: uProxy/%0.1f' % uproxy.VERSION])
-
-        rr, rw = await self._prepare_cmd(cr, cw, __cb)
-        if not rr:
-            return
-
         async def io_copy(r, w):
             """
-            Copy data from reader to writer
+            Forward data using a go-style coroutine
             """
             buf = bytearray(self.bufsize)
             mv = memoryview(buf)
@@ -94,7 +84,7 @@ class uProxy(uproxy.uProxy):
                     w.write(mv[:n])
                     await w.drain()
             except Exception as err:
-                self._log(uproxy.LOG_INFO, "  pipe disconnect, %s" % repr(err))
+                self._log(uproxy.LOG_INFO, "├─pipe disconnect, %s" % repr(err))
             await uproxy.ss_ensure_close(w)
 
         task_c2r = asyncio.create_task(io_copy(cr, rw))

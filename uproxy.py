@@ -86,53 +86,25 @@ async def _start_server(cb, host, port, backlog=100, ssl=None):
 
 
 
-def parse_http_header(line):
-    """
-    Parse first line of incoming HTTP request
-    """
-    method, url, proto = line.split(b' ') # `proto` ends with b'\n'
-
-    # remove 'http://' prefix
-    i = url.find(b'://')
-    if i!=-1:
-        url = url[i+3:]
-
-    # seperate path from url
-    i = url.find(b'/')
-    domain = url[:i] if i!=-1 else url
-    path = url[i:] if i!=-1 else b'/'
-
-    # seperate port from domain
-    i = domain.find(b':')
-    port = int(domain[i+1:]) if i!=-1 else 80
-    domain = domain[:i] if i!=-1 else domain
-
-    return method, domain, port, path, proto
-
 async def send_http_response(ss, code, desc="", headers=[], body=None):
     """
     send HTTP response
     """
-    cnt = 0
     try:
         l = b'HTTP/1.1 %d %s\n' % (code, desc)
-        cnt += len(l)
         ss.write(l)
         for h in headers:
             ss.write(h+b'\n')
-            cnt += len(h)+2
         ss.write(b'\n')
-        cnt += 2
         await ss.drain()
     except Exception as err:
         await ss_ensure_close(ss)
         raise err
-    return cnt
 
 def ss_get_peername(ss):
     """
     Polyfill of `socket.getpeername()`
-    @return: (ip, port)
+    @return: (ip: str, port: int)
     """
     import struct
     mv = memoryview(ss.get_extra_info('peername'))
@@ -195,6 +167,9 @@ class uProxy:
         await self._server.wait_closed()
 
     def _log(self, lvl, msg):
+        if self.loglevel>=LOG_DEBUG:
+            t = asyncio.current_task()
+            msg = '[%u] %s' % (id(t), msg)
         self.loglevel>=lvl and print(msg)
 
     def _limit_conns(self):
@@ -227,123 +202,56 @@ class uProxy:
                 return True
         return False
 
-    async def _accept_conn(self, cr, cw):
+    async def _parse_cmd(self, cr, cw):
         """
-        Non-blocking version of `connection.accept()`
-        Runs on a new task
-        @cr: stream reader for client socket
-        @cw: stream writer for client socket
+        Parse first line of incoming HTTP request
         """
-        self._conns += 1
-        self._limit_conns()
-
-        src_ip, src_port = ss_get_peername(cr)
-
-        # parse proxy header
         try:
-            header = await cr.readline()
-            if not header:
+            cmd = await cr.readline() # first line
+            if not cmd:
                 raise Exception("Empty Response")
+            cmd = cmd.replace(b'\r\n', b'\n')
         except Exception as err:
             self._log(LOG_INFO, "  error, %s" % repr(err))
             await ss_ensure_close(cw)
-            return
-        method, dst_domain, dst_port, path, proto = parse_http_header(header)
-        dst_ip = dst_domain.decode()
+            return None, None, None, None, None, None
 
-        # attach info to `Task` instance
-        task = asyncio.current_task()
-        task.src_ip = src_ip                # str
-        task.src_port = src_port            # int
-        task.dst_ip = dst_ip                # placeholder, not a real ip
-        task.dst_domain = dst_domain        # bytes
-        task.dst_port = dst_port            # int
-        task.task_id = hex(id(task))        # str
-        task.method = method                # bytes
-        task.path = path                    # str
-        task.proto = proto                  # str, ends with '\n'
+        method, url, proto = cmd.split(b' ') # `proto` ends with b'\n'
 
-        # access control
-        # tip: task object can be accessed inside acl function
-        if self.acl_callback and not self.acl_callback(src_ip, src_port, dst_ip, dst_port):
-            await ss_ensure_close(cw)
-            self._log(LOG_INFO, "BLOCK %s:%d --> %s:%d" % (src_ip, src_port, dst_ip, dst_port))
-            return
-        else:
-            self._log(LOG_INFO, "%s\t%s:%d\t==>\t%s:%d" % (task.method.decode(), src_ip, src_port, dst_ip, dst_port))
+        # remove 'http://' prefix
+        i = url.find(b'://')
+        if i!=-1:
+            url = url[i+3:]
 
-        # serve command
-        if method==b'CONNECT':
-            await self._CONNECT(cr, cw)
-        else:
-            await self._CMD(cr, cw)
-        self._log(LOG_DEBUG, "  close")
+        # seperate path from url
+        i = url.find(b'/')
+        domain = url[:i] if i!=-1 else url
+        path = url[i:] if i!=-1 else b'/'
 
-        self._conns -= 1
-        self._limit_conns()
+        # seperate port from domain
+        i = domain.find(b':')
+        port = int(domain[i+1:]) if i!=-1 else 80
+        domain = domain[:i] if i!=-1 else domain
 
-    async def _prepare_cmd(self, cr, cw, callback):
+        return cmd, method, domain, port, path, proto # bytes, bytes, int, bytes, bytes
+
+    async def _forward_data(self, cr,cw, rr,rw):
         """
-        Process client request's HTTP header line by line
-        Connect to dst domain, return remote socket's r/w
+        Forward between client and remote
         """
-        task = asyncio.current_task()
-        rr = rw = None # remote reader, remote writer
-
-        try:
-            rr, rw = await _open_connection(task.dst_domain, task.dst_port, local_addr=self.bind)
-
-            is_auth = not self.auth
-            while line := await cr.readline():
-                line = line.replace(b'\r\n', b'\n')
-                if self._authorize(line):
-                    is_auth = True
-                    continue
-                await callback(line, rr, rw)
-                if line == b'\n':
-                    break
-
-            if not is_auth:
-                raise Exception('Unauthorized')
-
-        except Exception as err:
-            self._log(LOG_INFO, "  error, %s" % repr(err))
-            await ss_ensure_close(rw)
-            await ss_ensure_close(cw)
-            return None, None
-
-        return rr, rw
-
-    async def _CONNECT(self, cr, cw):
-        """
-        Handle CONNECT command with `poll()`
-        NOTE: Only works with MicroPython asyncio
-        """
-        async def __cb(line, rr, rw):
-            # last line
-            if line == b'\n':
-                await send_http_response(cw, 200, b'Connection established', [b'Proxy-Agent: uProxy/%0.1f' % VERSION])
-
-        rr, rw = await self._prepare_cmd(cr, cw, __cb)
-        if not rr:
-            return
-
         import select
         pobj = select.poll()
         pobj.register(cr.s, select.POLLIN)
         pobj.register(rr.s, select.POLLIN)
 
-        # forward data
         try:
             buf = bytearray(self.bufsize)
             mv = memoryview(buf)
             done = False
 
             while True:
-
                 for so, evt in pobj.ipoll(0):
                     if evt==select.POLLIN:
-
                         reader = cr if so==cr.s else rr
                         writer = rw if so==cr.s else cw
 
@@ -363,50 +271,103 @@ class uProxy:
                 await asyncio.sleep(0)
 
         except Exception as err:
-            self._log(LOG_INFO, "  disconnect, %s" % repr(err))
+            self._log(LOG_INFO, "└─disconnect, %s" % repr(err))
 
         await ss_ensure_close(rw)
         await ss_ensure_close(cw)
 
-    async def _CMD(self, cr, cw):
+    # callback function for processing proxy request headers
+    async def _CONNECT(self, line, cr,cw, rr,rw):
+        # last line
+        if line == b'\n':
+            await send_http_response(cw, 200, b'Connection established', [b'Proxy-Agent: uProxy/%0.1f' % VERSION])
+
+    # callback function for processing proxy request headers
+    async def _CMD(self, line, cr,cw, rr,rw):
         """
-        Generic command handler
+        generic header callback function
         """
-        first = True
-        async def __cb(line, rr, rw):
-            nonlocal first
-            if first: # first line
-                first = False
-                t = asyncio.current_task()
-                cmd = b'%s %s %s' % (t.method, t.path, t.proto)
-                rw.write(cmd) # write command header
+        # first line
+        t = asyncio.current_task()
+        if t.first:
+            t.first = False
+            rw.write(b'%s %s %s' % (t.method, t.path, t.proto)) # write command header
 
-            # strip proxy header
-            mv = memoryview(line)
-            rw.write(mv[6:] if mv[:6] == b'Proxy-' else mv)
+        # strip proxy header
+        mv = memoryview(line)
+        rw.write(mv[6:] if mv[:6] == b'Proxy-' else mv)
 
-            if line == b'\n': # last line
-                await rw.drain()
+        # last line
+        if line == b'\n':
+            await rw.drain()
 
-        rr, rw = await self._prepare_cmd(cr, cw, __cb)
+    async def _parse_headers(self, cr, cw, callback):
+        """
+        Process proxy request header line by line
+        Connect to dst domain, return remote r/w
+        """
+        t = asyncio.current_task()
+        rr = rw = None # remote reader, remote writer
+
+        try:
+            rr, rw = await _open_connection(t.dst_domain, t.dst_port, local_addr=self.bind)
+
+            is_auth = not self.auth
+            while line := await cr.readline():
+                line = line.replace(b'\r\n', b'\n')
+                if self._authorize(line):
+                    is_auth = True
+                    continue
+                await callback(line, cr,cw, rr,rw)
+                if line == b'\n':
+                    break
+
+            if not is_auth:
+                raise Exception('Unauthorized')
+
+        except Exception as err:
+            self._log(LOG_INFO, "└─error, %s" % repr(err))
+            await ss_ensure_close(rw)
+            await ss_ensure_close(cw)
+            return None, None
+
+        return rr, rw
+
+    async def _accept_conn(self, cr, cw):
+        """
+        asyncio version of `connection.accept()`
+        Runs on a new task
+        """
+        t = asyncio.current_task()
+        self._conns += 1
+        self._limit_conns()
+
+        t.src_ip, t.src_port = ss_get_peername(cr)
+
+        # parse proxy request cmd
+        t.orig_cmd, t.method, t.dst_domain, t.dst_port, t.path, t.proto = await self._parse_cmd(cr, cw)
+        if not t.orig_cmd:
+            return
+        t.dst_ip = t.dst_domain.decode() # placeholder, not a real ip
+
+        # access control
+        # tip: task object can be accessed inside acl function
+        if self.acl_callback and not self.acl_callback(t.src_ip, t.src_port, t.dst_ip, t.dst_port):
+            await ss_ensure_close(cw)
+            self._log(LOG_INFO, "BLOCK %s:%d --> %s:%d" % (t.src_ip, t.src_port, t.dst_ip, t.dst_port))
+            return
+        else:
+            self._log(LOG_INFO, "%s\t%s:%d\t==>\t%s:%d" % (t.method.decode(), t.src_ip, t.src_port, t.dst_ip, t.dst_port))
+
+        # parse proxy request header
+        t.first = True # for `._CMD()`
+        callback = self._CONNECT if t.method==b'CONNECT' else self._CMD
+        rr, rw = await self._parse_headers(cr, cw, callback)
         if not rr:
             return
 
-        # relay remote response to client
-        try:
-            buf = bytearray(self.bufsize)
-            mv = memoryview(buf)
+        await self._forward_data(cr,cw, rr,rw)
 
-            while True:
-                n = await asyncio.wait_for(rr.readinto(mv), timeout=self.timeout)
-                if n<=0:
-                    break
-                cw.write(mv[:n])
-                await asyncio.sleep(0)
-            await cw.drain()
-
-        except Exception as err:
-            self._log(LOG_INFO, "  disconnect, %s" % repr(err))
-
-        await ss_ensure_close(rw)
-        await ss_ensure_close(cw)
+        self._log(LOG_DEBUG, "└─close")
+        self._conns -= 1
+        self._limit_conns()
