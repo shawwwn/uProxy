@@ -43,22 +43,22 @@ asyncio.run(proxy.run())
 
 ## API docs:
 
-* **`uproxy.uProxy(ip, port, bind, bufsize, maxconns, backlog, timeout, loglevel, ssl, acl_callback, auth, upstream)`**
+* **`uproxy.uProxy(ip='0.0.0.0', port=8765, bind=None, bufsize=8192, maxconns=0, backlog=100, timeout=30, ssl=None, loglevel=1, acl_callback=None, auth=None, upstream=None)`**
 
   Initialize proxy server
 
-  * **ip** - server ip [default: 0.0.0.0]
-  * **port** - server port [default: 8765]
-  * **bind** - ip address for outgoing connections to bind to [default: None]
-  * **bufsize** - buffer size of each connection, in bytes [default: 8192]
-  * **maxconns** - max number of ***accepted*** connections server can handle, 0 to disable [default: 0]
-  * **backlog** - max number of ***unaccepted*** connections waiting to be processed [default: 100]
-  * **timeout** - connection timeout, in seconds [default: 30]
-  * **loglevel** - log level (0-quiet, 1-info, 2-debug) [default: 1]
-  * **ssl** - a SSLContext object to start a HTTPS server [default: None]
-  * **acl_callback** - access control callback function [default: None]
-  * **auth** - an 'user:password' pair that clients need to provide in order to authenticate with server [default: None]
-  * **upstream** - an 'ip:port' pair to connect to as an upstream HTTP proxy [default: None]
+  * **ip** - server ip
+  * **port** - server port
+  * **bind** - ip address for outgoing connections to bind to
+  * **bufsize** - buffer size of each connection, in bytes
+  * **maxconns** - max number of ***accepted*** connections server can handle, 0 to disable
+  * **backlog** - max number of ***unaccepted*** connections waiting to be processed
+  * **timeout** - connection timeout, in seconds
+  * **loglevel** - log level (0-quiet, 1-info, 2-debug)
+  * **ssl** - a SSLContext object to start a HTTPS server
+  * **acl_callback** - access control callback function
+  * **auth** - an 'user:password' pair that clients need to provide in order to authenticate with server
+  * **upstream** - an 'ip:port' pair to connect to as an upstream HTTP proxy
 
 * **`uProxy.run()`**
 
