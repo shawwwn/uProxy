@@ -186,10 +186,8 @@ class uProxy:
     def _limit_conns(self):
         """
         Temporarily disable socket polling if number of concurrent connections
-        exceed a certain limit, so that server's listening socket will no longer
+        exceed a certain limit so that server's listening socket will no longer
         accept new connections.
-        Doing so will generate some connection loss errors, but nothing too
-        serious.
         """
         if not self.maxconns or self.maxconns<=0:
             return
@@ -256,8 +254,6 @@ class uProxy:
     async def handshake(self, cr, cw):
         """
         Perform handshake with client and connect to remote server
-        - update `Task` object
-        @return: remote socket r/w
         """
         t = asyncio.current_task()
         src_ip, src_port = ss_get_peername(cr)
@@ -340,7 +336,6 @@ class uProxy:
                             first = False
                             rw.write(b'%s %s %s' % (method, bytes(path), proto))
                         # strip proxy header
-                        mv = memoryview(line)
                         rw.write(mv[6:] if mv[:6] == b'Proxy-' else mv)
 
                 if last:
