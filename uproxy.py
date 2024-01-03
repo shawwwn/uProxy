@@ -145,7 +145,8 @@ class uProxy:
 
     def __init__(self, ip='0.0.0.0', port=8765, bind=None, \
                 bufsize=8192, maxconns=0, backlog=100, timeout=30, \
-                ssl=None, loglevel=LOG_INFO, acl_callback=None, auth=None):
+                ssl=None, loglevel=LOG_INFO, acl_callback=None, auth=None, \
+                upstream=None):
         self.ip = ip
         self.port = port
         self.bind = bind
@@ -160,6 +161,11 @@ class uProxy:
         self._conns = 0                   # current connection count
         self._polling = True              # server socket polling availability
         self.auth = b'Basic '+b64(auth, True) if auth else None
+        try:
+            self.upstream_ip, self.upstream_port = upstream.strip().split(':')
+            self.upstream_port = int(self.upstream_port)
+        except:
+            self.upstream_ip = self.upstream_port = None
 
     async def run(self):
         self._server = await _start_server(self._accept_conn, self.ip, self.port, backlog=self.backlog, ssl=self.ssl)
@@ -292,24 +298,35 @@ class uProxy:
 
     # callback function for processing proxy request headers
     async def _CONNECT(self, line, cr,cw, rr,rw):
-        # last line
-        if line == b'\n':
-            await send_http_response(cw, 200, b'Connection established', [b'Proxy-Agent: uProxy/%0.1f' % VERSION])
+        if self.upstream_ip:
+            t = asyncio.current_task()
+            if t.first:
+                t.first = False
+                rw.write(t.orig_cmd)
+            rw.write(line)
+        else:
+            # last line
+            if line == b'\n':
+                await send_http_response(cw, 200, b'Connection established', [b'Proxy-Agent: uProxy/%0.1f' % VERSION])
 
     # callback function for processing proxy request headers
     async def _CMD(self, line, cr,cw, rr,rw):
         """
         generic header callback function
         """
-        # first line
         t = asyncio.current_task()
-        if t.first:
-            t.first = False
-            rw.write(b'%s %s %s' % (t.method, t.path, t.proto)) # write command header
-
-        # strip proxy header
-        mv = memoryview(line)
-        rw.write(mv[6:] if mv[:6] == b'Proxy-' else mv)
+        if self.upstream_ip:
+            if t.first:
+                t.first = False
+                rw.write(t.orig_cmd)
+            rw.write(line)
+        else:
+            if t.first:
+                t.first = False
+                rw.write(b'%s %s %s' % (t.method, t.path, t.proto))
+            # strip proxy header
+            mv = memoryview(line)
+            rw.write(mv[6:] if mv[:6] == b'Proxy-' else mv)
 
         # last line
         if line == b'\n':
@@ -324,7 +341,7 @@ class uProxy:
         rr = rw = None # remote reader, remote writer
 
         try:
-            rr, rw = await _open_connection(t.dst_domain, t.dst_port, local_addr=self.bind)
+            rr, rw = await _open_connection(t.dst_ip, t.dst_port, local_addr=self.bind)
 
             is_auth = not self.auth
             while line := await cr.readline():
@@ -379,7 +396,12 @@ class uProxy:
         t.orig_cmd, t.method, t.dst_domain, t.dst_port, t.path, t.proto = await self._parse_cmd(cr, cw)
         if not t.orig_cmd:
             return
-        t.dst_ip = t.dst_domain.decode() # placeholder, not a real ip
+
+        if self.upstream_ip:
+            t.dst_ip = self.upstream_ip
+            t.dst_port = self.upstream_port
+        else:
+            t.dst_ip = t.dst_domain.decode() # placeholder, not a real ip
 
         # access control
         # tip: task object can be accessed inside acl function

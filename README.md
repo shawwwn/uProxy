@@ -19,7 +19,7 @@ asyncio.run(proxy.run())
 cproxy.py [-h] [-v] [--ip IP] [--port PORT] [--bind BIND]
           [--bufsize BUFSIZE] [--maxconns N] [--backlog M]
           [--timeout TIMEOUT] [--loglevel LOGLEVEL]
-          [--auth AUTH]
+          [--auth AUTH] [--upstream UPSTREAM]
 ```
 
 See [next section](#api-docs) for parameter usage.
@@ -32,7 +32,7 @@ GET     192.168.1.230:54312     ==>     ifconfig.me:80
 CONNECT 192.168.1.230:54315     ==>     www.google.com:443
 ```
 
-Alternatively, to use `cproxy.py` in code:
+To use `cproxy.py` in code:
 
 ```py
 import asyncio
@@ -43,7 +43,7 @@ asyncio.run(proxy.run())
 
 ## API docs:
 
-* **`uproxy.uProxy(ip, port, bind, bufsize, maxconns, backlog, timeout, loglevel, ssl)`**
+* **`uproxy.uProxy(ip, port, bind, bufsize, maxconns, backlog, timeout, loglevel, ssl, acl_callback, auth, upstream)`**
 
   Initialize proxy server
 
@@ -57,7 +57,8 @@ asyncio.run(proxy.run())
   * **loglevel** - log level (0-quiet, 1-info, 2-debug) [default: 1]
   * **ssl** - a SSLContext object to start a HTTPS server [default: None]
   * **acl_callback** - access control callback function [default: None]
-  * **auth** - a 'user:password' pair that clients need to provide in order to authenticate with server [default: None]
+  * **auth** - an 'user:password' pair that clients need to provide in order to authenticate with server [default: None]
+  * **upstream** - an 'ip:port' pair to connect to as an upstream HTTP proxy [default: None]
 
 * **`uProxy.run()`**
 
@@ -82,5 +83,5 @@ asyncio.run(proxy.run())
 
 ## Todo:
 - [X] Authorization
-- [ ] Forward to upstream proxy
+- [X] Forward to upstream proxy
 - [X] HTTPS server

@@ -124,13 +124,15 @@ if __name__== "__main__":
     parser.add_argument('--backlog', help="max number of unaccepted connections waiting to be processed [%(default)s]", metavar='M', default=100, type=int)
     parser.add_argument('--timeout', help="connection timeout, in seconds [%(default)s]", default=30, type=int)
     parser.add_argument('--loglevel', help="log level (0-quiet, 1-info, 2-debug) [%(default)s]", default=1, type=int)
-    parser.add_argument('--auth', help="a username:password pair for server authentication [%(default)s]", default=None, type=str)
+    parser.add_argument('--auth', help="an username:password pair for server authentication [%(default)s]", default=None, type=str)
+    parser.add_argument('--upstream', help="an ip:port pair to connect to as an upstream http proxy [%(default)s]", default=None, type=str)
     args = parser.parse_args()
 
     proxy = uProxy(ip=args.ip, port=args.port, bind=args.bind, \
                 bufsize=args.bufsize, maxconns=args.maxconns, \
                 backlog=args.backlog, timeout=args.timeout, \
-                loglevel=args.loglevel, auth=args.auth)
+                loglevel=args.loglevel, auth=args.auth, \
+                upstream=args.upstream)
     asyncio.run(proxy.run())
 
     print("done")
