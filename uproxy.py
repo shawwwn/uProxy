@@ -107,9 +107,10 @@ def ss_get_peername(ss):
     @return: (ip: str, port: int)
     """
     import struct
+    import socket
     mv = memoryview(ss.get_extra_info('peername'))
-    _, port, a, b, c, d = struct.unpack('!HHBBBB', mv[0:8])
-    ip = '%u.%u.%u.%u' % (a, b, c, d)
+    _, port = struct.unpack('!HH', mv[0:4])
+    ip = socket.inet_ntop(socket.AF_INET, mv[4:8])
     return ip, port
 
 async def ss_ensure_close(ss):
