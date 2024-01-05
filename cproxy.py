@@ -103,7 +103,7 @@ async def forward_data(self, cr,cw, rr,rw):
     await asyncio.gather(task_c2r, task_r2c, return_exceptions=False)
 
 #
-# Attach global attributes
+# Make CPython-compatible Classes
 #
 if hasattr(uproxy, 'uHTTP'):
     class uHTTP(uproxy.uHTTP):
@@ -113,7 +113,6 @@ if hasattr(uproxy, 'uHTTP'):
         _limit_conns = limit_conns
         _forward_data = forward_data
 
-    # add to global()
     globals()['uHTTP'] = uHTTP
 
 if hasattr(uproxy, 'uSOCKS4'):
@@ -124,8 +123,17 @@ if hasattr(uproxy, 'uSOCKS4'):
         _limit_conns = limit_conns
         _forward_data = forward_data
 
-    # add to global()
-    globals()['uHTTP'] = uHTTP
+    globals()['uSOCKS4'] = uSOCKS4
+
+if hasattr(uproxy, 'uSOCKS5'):
+    class uSOCKS5(uproxy.uSOCKS5):
+        """
+        CPython compatible uSOCKS5
+        """
+        _limit_conns = limit_conns
+        _forward_data = forward_data
+
+    globals()['uSOCKS5'] = uSOCKS5
 
 
 
