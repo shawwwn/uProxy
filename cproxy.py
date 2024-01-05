@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 # A CPython wrapper for uProxy
+# This file is for CPython only!
 # Copyright (c) 2023 Shawwwn <shawwwn1@gmail.com>
 # License: MIT
-#
-# > CPython only!
-# > For MicroPython-compatible uProxy, refer to `uproxy.py`
-#
+import sys
 import asyncio
 import time
 import uproxy
@@ -173,6 +171,7 @@ if __name__== "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('-v', '--version', action='version', version='uProxy %0.1f' % uproxy.VERSION)
+    parser.add_argument('--proto', help="proxy protocol (HTTP/SOCKS4/SOCKS5)", default='HTTP', type=str)
     parser.add_argument('--ip', help="server ip [%(default)s]", default='0.0.0.0', type=str)
     parser.add_argument('--port', help="server port [%(default)s]", default=8765, type=int)
     parser.add_argument('--bind', help="ip address for outgoing connections to bind to [%(default)s]", default=None, type=str)
@@ -185,7 +184,20 @@ if __name__== "__main__":
     parser.add_argument('--upstream', help="an ip:port pair to connect to as an upstream http proxy [%(default)s]", default=None, type=str)
     args = parser.parse_args()
 
-    proxy = uHTTP(ip=args.ip, port=args.port, bind=args.bind, \
+    proxyCls = uHTTP
+    proto = args.proto.upper()
+    if proto=='HTTP':
+        proxyCls = uHTTP
+    elif proto=='SOCKS4' or proto=='SOCKS4A':
+        proxyCls = uSOCKS4
+    elif proto=='SOCKS5' or proto=='SOCKS5H':
+        pass # TODO: to be implemented
+    else:
+        print("Unknown protocol", file=sys.stderr)
+        parser.print_help()
+        sys.exit(2)
+
+    proxy = proxyCls(ip=args.ip, port=args.port, bind=args.bind, \
                 bufsize=args.bufsize, maxconns=args.maxconns, \
                 backlog=args.backlog, timeout=args.timeout, \
                 loglevel=args.loglevel, auth=args.auth, \
