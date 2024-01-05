@@ -2,7 +2,7 @@
 A minimal, memory-efficient HTTP(S)/SOCKS4(a) proxy server designed to run in memory-constraint environments.\
 Originally written for MicroPython, now compatible with CPython.
 
-## features
+## Features
 * HTTP/HTTPS protocol (all commands supported)
 * SOCKS4(a) protocol (all commands supported)
 * Maximum connection limit
@@ -86,13 +86,13 @@ asyncio.run(proxy.run())
   def acl_callback(src_ip: str, src_port: int, dst_ip: str, dst_port: int) -> bool
   ```
 
-* **`uproxy.SOCKS4(ip='0.0.0.0', port=8765, bind=None, bufsize=8192, maxconns=0, backlog=100, timeout=30, ssl=None, loglevel=1, acl_callback=None, auth=None, upstream=None)`**
+* **`uproxy.SOCKS4(...)`**
   
   Same as `uHTTP`
 
   * **upstream** - forward to an upstream SOCKS4 proxy
 
-* **`uproxy.SOCKS5(ip='0.0.0.0', port=8765, bind=None, bufsize=8192, maxconns=0, backlog=100, timeout=30, ssl=None, loglevel=1, acl_callback=None, auth=None, upstream=None)`**
+* **`uproxy.SOCKS5(...)`**
 
   TODO: to be implemented
 
