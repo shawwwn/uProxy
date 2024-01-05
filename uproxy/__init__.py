@@ -7,8 +7,9 @@ from .core import *
 
 def __init__():
     attrs = {
-        "uSOCKS4": "socks4",
         "uHTTP": "http",
+        "uSOCKS4": "socks4",
+        "uSOCKS5": "socks5",
     }
 
     for k in attrs:

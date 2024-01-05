@@ -15,8 +15,9 @@ class uSOCKS4(core.uProxy):
     SOCKS4(a) Proxy server class for uProxy
     """
 
-    async def _send_reply(self, cr,cw ,REP,DSTPORT=0,DSTIP=0):
-        data = struct.pack('!BBHI', 0,REP,DSTPORT,DSTIP)
+    async def _send_reply(self, cr,cw ,REP,DSTPORT='',DSTIP=0):
+        DSTIP = socket.inet_pton(socket.AF_INET, DSTIP) if DSTIP else b'\0\0\0\0' # to 4 bytes
+        data = struct.pack('!BBH4s', 0,REP,DSTPORT,DSTIP)
         cw.write(data)
         await cw.drain()
         return data
@@ -71,9 +72,9 @@ class uSOCKS4(core.uProxy):
                     # listen to a random port that is available
                     avail = False # port available
                     for i in range(1,3):
-                        bind_port = randrange(49152, 65535)
+                        bnd_port = core.randrange(49152, 65535)
                         try:
-                            srv = await core._start_server(bind_accept, self.ip, bind_port, backlog=self.backlog) # get a random port
+                            srv = await core._start_server(bind_accept, self.ip, bnd_port, backlog=self.backlog) # get a random port
                         except:
                             await core.ss_ensure_close(srv)
                             await asyncio.sleep(0)
@@ -83,16 +84,16 @@ class uSOCKS4(core.uProxy):
                     if not avail:
                         await self._send_reply(cr,cw, REP=91)
                         raise Exception("no port")
-                    self._log(LOG_DEBUG, "BIND\tlisten on\t\t<==\t%s:%d" % (self.ip, bind_port))
-                    await self._send_reply(cr,cw, REP=90, DSTPORT=bind_port, DSTIP=0) # INADDR_ANY
+                    self._log(core.LOG_DEBUG, "BIND\tlisten on\t\t<==\t%s:%d" % (self.ip, bnd_port))
+                    await self._send_reply(cr,cw, REP=90, DSTPORT=bnd_port, DSTIP=0) # INADDR_ANY
 
                     await asyncio.wait_for(ready.wait(), timeout=self.timeout)
-                    bind_ip, bind_port = core.ss_get_peername(rr) # set via `bind_accept()`
-                    if bind_ip != dst_ip:
+                    bnd_ip, bnd_port = core.ss_get_peername(rr) # set via `bind_accept()`
+                    if bnd_ip != dst_ip:
                         await self._send_reply(cr,cw, REP=91)
                         raise Exception("ip mismatch")
-                    self._log(core.LOG_INFO, "BIND\t%s:%d\t<==\t%s:%d" % (src_ip, src_port, bind_ip, bind_port))
-                    await self._send_reply(cr,cw, REP=90)
+                    self._log(core.LOG_INFO, "BIND\t%s:%d\t<==\t%s:%d" % (src_ip, src_port, bnd_ip, bnd_port))
+                    await self._send_reply(cr,cw, REP=90, DSTPORT=bnd_port, DSTIP=bnd_ip)
 
                 except asyncio.TimeoutError:
                     await core.ss_ensure_close(srv)

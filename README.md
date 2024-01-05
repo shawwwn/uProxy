@@ -5,6 +5,7 @@ Originally written for MicroPython, now compatible with CPython.
 ## Features
 * HTTP/HTTPS protocol (all commands supported)
 * SOCKS4(a) protocol (all commands supported)
+* SOCKS5(h) protocol (all commands supported)
 * Maximum connection limit
 * Modular architecture
 * CPython-compatiable
@@ -33,7 +34,7 @@ cproxy.py [-h] [-v] [--proto PROTO] [--ip IP] [--port PORT] [--bind BIND]
           [--auth AUTH] [--upstream UPSTREAM]
 ```
 
-Available values for argument `--proto` is `HTTP`,`SOCKS4`, and `SOCKS5`. \
+Available values for argument `--proto` are `HTTP`,`SOCKS4`, and `SOCKS5`. \
 Rest of the arguments' values are the same as in [api docs](#api-docs).
 
 ```console
@@ -70,7 +71,7 @@ asyncio.run(proxy.run())
   * **ssl** - a SSLContext object to start a HTTPS server
   * **acl_callback** - access control callback function
   * **auth** - an 'user:password' pair that clients need to provide in order to authenticate with server
-  * **upstream** - an 'ip:port' pair to connect to as an upstream HTTP proxy
+  * **upstream** - an 'ip:port' pair to connect to as an upstream proxy
 
 * **`uHTTP.run()`**
 
@@ -87,16 +88,12 @@ asyncio.run(proxy.run())
   ```
 
 * **`uproxy.SOCKS4(...)`**
-  
-  Same as `uHTTP`
 
-  * **upstream** - forward to an upstream SOCKS4 proxy
+  Same as `uHTTP`
 
 * **`uproxy.SOCKS5(...)`**
 
-  TODO: to be implemented
-
-  * **upstream** - forward to an upstream SOCKS5 proxy
+  Same as `uHTTP`
 
 ## Notes:
 
@@ -104,8 +101,8 @@ asyncio.run(proxy.run())
 + To use it with CPython, copy both the directory and `cproxy.py`, start with the file.
 + Remove `<protocol_name>.py` from `uproxy/` if you don't need this protocol, this helps reduce code size.
 + `cproxy.py` replaces some core logic of `uproxy.py`, making it run much faster, at the expense of 2x memory consumption.
-+ The `upstream` parameter only forwards traffic to an upstream proxy with the same protocol. Mixing protocols is not supported. Feel free to contribute ;)
-+ A set of paramters for a memory-constraint environment should be `maxconns=10, backlog=5, bufsize=512, timeout=5`.
++ The `upstream` parameter only forwards traffic to an upstream proxy with the same protocol. Mixing protocols is not supported.
++ A good set of paramters for uproxy to run in a memory-constraint environment should be `maxconns=10, backlog=5, bufsize=512, timeout=5`.
 + For detail usage, please refer to `examples/`
 
 ## Todo:

@@ -7,7 +7,7 @@ try:
 except:
     import asyncio
 
-VERSION = 1.1
+VERSION = 1.0
 LOG_NONE = 0
 LOG_INFO = 1
 LOG_DEBUG = 2
@@ -115,6 +115,14 @@ def b64(text, enc=True):
         return b2a_base64(text)[:-1]
     else:
         return a2b_base64(text)[:-1]
+
+def randrange(a, b):
+    """
+    Polyfill of `random.randrange()`
+    """
+    import random
+    return int(random.getrandbits(16)/65535 * (b-a) + a)
+
 
 
 
@@ -253,8 +261,8 @@ class uProxy:
             except Exception as err:
                 if not isinstance(err, asyncio.TimeoutError) \
                 and not (isinstance(err, OSError) and hasattr(err, 'value') and err.value==9):
-                    self._log(core.LOG_INFO, "└─pipe disconnect, %s" % repr(err), traceback=1)
-            await core.ss_ensure_close(w)
+                    self._log(LOG_INFO, "└─pipe disconnect, %s" % repr(err), traceback=1)
+            await ss_ensure_close(w)
             self._log(LOG_DEBUG, "└─pipe close", traceback=1)
 
         t = asyncio.current_task()

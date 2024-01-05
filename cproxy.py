@@ -9,10 +9,6 @@ import time
 import uproxy
 from uproxy.core import VERSION, LOG_NONE, LOG_INFO, LOG_DEBUG
 
-old_import = __import__
-def new_import(name, globals=None, locals=None, fromlist=(), level=0):
-    pass
-
 def ticks_diff(ticks1, ticks2):
     """
     Micropython Polyfil
@@ -74,7 +70,37 @@ def limit_conns(self):
         self._log(uproxy.LOG_DEBUG, "polling enabled")
         self._polling = True
 
+async def forward_data(self, cr,cw, rr,rw):
+    """
+    This function is much faster than the default
+    method but will consume twice the memory.
+    Compatible with MicroPython.
+    """
+    async def io_copy(r, w):
+        """
+        Forward data using a go-style coroutine
+        """
+        buf = bytearray(self.bufsize)
+        mv = memoryview(buf)
+        try:
+            while True:
+                n = await asyncio.wait_for(r.readinto(mv), timeout=self.timeout)
+                if n<=0:
+                    break
+                w.write(mv[:n])
+                await w.drain()
+        except Exception as err:
+            if not isinstance(err, asyncio.TimeoutError):
+                self._log(uproxy.LOG_INFO, "└─pipe disconnect, %s" % repr(err), traceback=1)
+        await uproxy.ss_ensure_close(w)
+        self._log(uproxy.LOG_DEBUG, "└─pipe close", traceback=1)
 
+    t = asyncio.current_task()
+    task_c2r = asyncio.create_task(io_copy(cr, rw))
+    task_c2r._parent = t
+    task_r2c = asyncio.create_task(io_copy(rr, cw))
+    task_r2c._parent = t
+    await asyncio.gather(task_c2r, task_r2c, return_exceptions=False)
 
 #
 # Attach global attributes
@@ -84,40 +110,8 @@ if hasattr(uproxy, 'uHTTP'):
         """
         CPython compatible uHTTP
         """
-
         _limit_conns = limit_conns
-
-        async def _forward_data(self, cr,cw, rr,rw):
-            """
-            This function is much faster than the default
-            method but will consume twice the memory.
-            Compatible with MicroPython.
-            """
-            async def io_copy(r, w):
-                """
-                Forward data using a go-style coroutine
-                """
-                buf = bytearray(self.bufsize)
-                mv = memoryview(buf)
-                try:
-                    while True:
-                        n = await asyncio.wait_for(r.readinto(mv), timeout=self.timeout)
-                        if n<=0:
-                            break
-                        w.write(mv[:n])
-                        await w.drain()
-                except Exception as err:
-                    if not isinstance(err, asyncio.TimeoutError):
-                        self._log(uproxy.LOG_INFO, "└─pipe disconnect, %s" % repr(err), traceback=1)
-                await uproxy.ss_ensure_close(w)
-                self._log(uproxy.LOG_DEBUG, "└─pipe close", traceback=1)
-
-            t = asyncio.current_task()
-            task_c2r = asyncio.create_task(io_copy(cr, rw))
-            task_c2r._parent = t
-            task_r2c = asyncio.create_task(io_copy(rr, cw))
-            task_r2c._parent = t
-            await asyncio.gather(task_c2r, task_r2c, return_exceptions=False)
+        _forward_data = forward_data
 
     # add to global()
     globals()['uHTTP'] = uHTTP
@@ -127,40 +121,8 @@ if hasattr(uproxy, 'uSOCKS4'):
         """
         CPython compatible uSOCKS4
         """
-
         _limit_conns = limit_conns
-
-        async def _forward_data(self, cr,cw, rr,rw):
-            """
-            This function is much faster than the default
-            method but will consume twice the memory.
-            Compatible with MicroPython.
-            """
-            async def io_copy(r, w):
-                """
-                Forward data using a go-style coroutine
-                """
-                buf = bytearray(self.bufsize)
-                mv = memoryview(buf)
-                try:
-                    while True:
-                        n = await asyncio.wait_for(r.readinto(mv), timeout=self.timeout)
-                        if n<=0:
-                            break
-                        w.write(mv[:n])
-                        await w.drain()
-                except Exception as err:
-                    if not isinstance(err, asyncio.TimeoutError):
-                        self._log(uproxy.LOG_INFO, "└─pipe disconnect, %s" % repr(err), traceback=1)
-                await uproxy.ss_ensure_close(w)
-                self._log(uproxy.LOG_DEBUG, "└─pipe close", traceback=1)
-
-            t = asyncio.current_task()
-            task_c2r = asyncio.create_task(io_copy(cr, rw))
-            task_c2r._parent = t
-            task_r2c = asyncio.create_task(io_copy(rr, cw))
-            task_r2c._parent = t
-            await asyncio.gather(task_c2r, task_r2c, return_exceptions=False)
+        _forward_data = forward_data
 
     # add to global()
     globals()['uHTTP'] = uHTTP
@@ -191,7 +153,7 @@ if __name__== "__main__":
     elif proto=='SOCKS4' or proto=='SOCKS4A':
         proxyCls = uSOCKS4
     elif proto=='SOCKS5' or proto=='SOCKS5H':
-        pass # TODO: to be implemented
+        proxyCls = uSOCKS5
     else:
         print("Unknown protocol", file=sys.stderr)
         parser.print_help()
