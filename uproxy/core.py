@@ -1,17 +1,13 @@
-#!/usr/bin/env micropython
-# uProxy - an minimal, memory-efficient HTTP/HTTPS proxy server made for MicroPython
+# Core utility functions for uproxy module
 # Copyright (c) 2023 Shawwwn <shawwwn1@gmail.com>
 # License: MIT
-#
-# > MicroPython only!
-# > For CPython-compatible uProxy, refer to `cproxy.py`
-#
+
 try:
     import uasyncio as asyncio
 except:
     import asyncio
 
-VERSION = 1.0
+VERSION = 1.1
 LOG_NONE = 0
 LOG_INFO = 1
 LOG_DEBUG = 2
@@ -84,23 +80,6 @@ async def _start_server(cb, host, port, backlog=100, ssl=None):
         raise er
     return srv
 
-
-
-async def send_http_response(ss, code, desc="", headers=[], body=None):
-    """
-    send HTTP response
-    """
-    try:
-        l = b'HTTP/1.1 %d %s\n' % (code, desc)
-        ss.write(l)
-        for h in headers:
-            ss.write(h+b'\n')
-        ss.write(b'\n')
-        await ss.drain()
-    except Exception as err:
-        await ss_ensure_close(ss)
-        raise err
-
 def ss_get_peername(ss):
     """
     Polyfill of `socket.getpeername()`
@@ -141,7 +120,7 @@ def b64(text, enc=True):
 
 class uProxy:
     """
-    Proxy Server
+    Base proxy server class for uProxy
     """
 
     def __init__(self, ip='0.0.0.0', port=8765, bind=None, \
@@ -201,7 +180,7 @@ class uProxy:
             self._log(LOG_DEBUG, "polling enabled")
             self._polling = True
 
-    async def _forward_data(self, cr,cw, rr,rw):
+    async def _forward_data2(self, cr,cw, rr,rw):
         """
         Forward between client and remote
         """
@@ -252,107 +231,42 @@ class uProxy:
         await ss_ensure_close(rw)
         await ss_ensure_close(cw)
 
-    async def handshake(self, cr, cw):
+    async def _forward_data(self, cr,cw, rr,rw):
         """
-        Perform handshake with client and connect to remote server
+        This function is much faster than the default
+        method but will consume twice the memory.
+        Compatible with MicroPython.
         """
+        async def io_copy(r, w):
+            """
+            Forward data using a go-style coroutine
+            """
+            buf = bytearray(self.bufsize)
+            mv = memoryview(buf)
+            try:
+                while True:
+                    n = await asyncio.wait_for(r.readinto(mv), timeout=self.timeout)
+                    if n<=0:
+                        break
+                    w.write(mv[:n])
+                    await w.drain()
+            except Exception as err:
+                if not isinstance(err, asyncio.TimeoutError) \
+                and not (isinstance(err, OSError) and hasattr(err, 'value') and err.value==9):
+                    self._log(core.LOG_INFO, "└─pipe disconnect, %s" % repr(err), traceback=1)
+            await core.ss_ensure_close(w)
+            self._log(LOG_DEBUG, "└─pipe close", traceback=1)
+
         t = asyncio.current_task()
-        src_ip, src_port = ss_get_peername(cr)
+        task_c2r = asyncio.create_task(io_copy(cr, rw))
+        task_c2r._parent = t
+        task_r2c = asyncio.create_task(io_copy(rr, cw))
+        task_r2c._parent = t
+        await asyncio.gather(task_c2r, task_r2c, return_exceptions=False)
 
-        #
-        # Parse proxy request command
-        # * remove 'http://' prefix
-        # * seperate path from url
-        # * seperate port from url (if any)
-        #
-        try:
-            cmd = await cr.readline() # first line
-            if not cmd:
-                raise Exception("empty response")
-            cmd = cmd.replace(b'\r\n', b'\n')
-
-            method, url, proto = cmd.split(b' ') # `proto` ends with b'\n'
-            mv = memoryview(url)
-            i = url.find(b'://')
-            i = i+3 if i!=-1 else 0
-            j = url.find(b'/', i)
-            j = j if j!=-1 else len(url)
-            path = mv[j:] if mv[j:]!=b'' else b'/'
-            domain = mv[i:j]
-            k = url.find(b':', i)
-            dst_port = int(bytes(mv[k+1:j])) if k!=-1 else 80
-            domain = mv[i:k] if k!=-1 else domain
-            dst_ip = str(domain, 'ascii')  # placeholder, not a real ip
-        except Exception as err:
-            self._log(LOG_INFO, "└─error, %s" % repr(err))
-            await ss_ensure_close(cw)
-            return None, None
-
-        #
-        # Access control
-        #
-        if self.acl_callback and not self.acl_callback(src_ip, src_port, dst_ip, dst_port):
-            await ss_ensure_close(cw)
-            self._log(LOG_INFO, "BLOCK %s:%d --> %s:%d" % (src_ip, src_port, dst_ip, dst_port))
-            return None, None
-        else:
-            self._log(LOG_INFO, "%s\t%s:%d\t==>\t%s:%d" % (method.decode(), src_ip, src_port, dst_ip, dst_port))
-
-        #
-        # Parse proxy request HTTP headers
-        #
-        rr = rw = None # remote reader, remote writer
-        try:
-            dst_ip = self.upstream_ip if self.upstream_ip else dst_ip
-            dst_port = self.upstream_port if self.upstream_ip else dst_port
-            rr, rw = await _open_connection(dst_ip, dst_port, local_addr=self.bind)
-
-            is_auth = not self.auth
-            first = True
-            while line := await cr.readline():
-                line = line.replace(b'\r\n', b'\n')
-                mv = memoryview(line)
-                last = True if line == b'\n' else False
-
-                if mv[:20]=='Proxy-Authorization:':
-                    if self.auth and mv[21:]==self.auth:
-                        is_auth = True
-                    if not self.upstream_ip:
-                        continue
-
-                if self.upstream_ip:
-                    # forward all to upstream proxy
-                    if first:
-                        first = False
-                        rw.write(cmd)
-                    rw.write(line)
-                else:
-                    if method==b'CONNECT':
-                        # CONNECT
-                        if last:
-                            await send_http_response(cw, 200, b'Connection established', [b'Proxy-Agent: uProxy/%0.1f' % VERSION])
-                    else:
-                        # GET/POST/HEAD/OPTION...
-                        if first:
-                            first = False
-                            rw.write(b'%s %s %s' % (method, bytes(path), proto))
-                        # strip proxy header
-                        rw.write(mv[6:] if mv[:6] == b'Proxy-' else mv)
-
-                if last:
-                    await rw.drain()
-                    break
-
-            if not is_auth:
-                raise Exception('Unauthorized')
-
-        except Exception as err:
-            self._log(LOG_INFO, "└─error, %s" % repr(err))
-            await ss_ensure_close(rw)
-            await ss_ensure_close(cw)
-            return None, None
-
-        return rr, rw
+    async def _handshake(self, cr, cw):
+        """ placeholder """
+        return None, None
 
     async def _accept_conn(self, cr, cw):
         """
@@ -363,7 +277,7 @@ class uProxy:
         await asyncio.sleep(0)
         self._limit_conns()
         await asyncio.sleep(0)
-        rr, rw = await self.handshake(cr, cw)
+        rr, rw = await self._handshake(cr, cw)
         self._conns -= 1
         await asyncio.sleep(0)
         self._limit_conns()
