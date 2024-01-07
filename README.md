@@ -3,9 +3,9 @@ A minimal, memory-efficient HTTP(S)/SOCKS4(a) proxy server designed to run in me
 Originally written for MicroPython, now compatible with CPython.
 
 ## Features
-* HTTP/HTTPS protocol (all commands supported)
-* SOCKS4(a) protocol (all commands supported)
-* SOCKS5(h) protocol (all commands supported)
+* HTTP/HTTPS protocol (GET/POST/CONNECT/...)
+* SOCKS4(a) protocol (CONNECT/BIND)
+* SOCKS5(h) protocol (CONNECT/BIND/UDP_ASSOCIATE)
 * Maximum connection limit
 * Modular architecture
 * CPython-compatiable
@@ -99,7 +99,7 @@ asyncio.run(proxy.run())
 
 + To use it with MicroPython, only copy `uproxy/` directory.
 + To use it with CPython, copy both the directory and `cproxy.py`, start with the file.
-+ Remove `<protocol_name>.py` from `uproxy/` if you don't need this protocol, this helps reduce code size.
++ When you are copying the module's directory, exclude `<protocol_name>.py` from directory if you have no use for it (e.g. remove `socks4.py` from `uproxy/` so to go without SOCKS4 support). This helps reduce code size.
 + `cproxy.py` replaces some core logic of `uproxy.py`, making it run much faster, at the expense of 2x memory consumption.
 + The `upstream` parameter only forwards traffic to an upstream proxy with the same protocol. Mixing protocols is not supported.
 + A good set of paramters for uproxy to run in a memory-constraint environment should be `maxconns=10, backlog=5, bufsize=512, timeout=5`.
@@ -111,5 +111,5 @@ asyncio.run(proxy.run())
 - [X] HTTPS server
 - [X] SOCKS4 (CONNECT/BIND)
 - [ ] SOCKS4 upstream
-- [ ] SOCKS5 (CONNECT/BIND/UDP_ASSOCIATE)
+- [X] SOCKS5 (CONNECT/BIND/UDP_ASSOCIATE)
 - [ ] SOCK5 upstream
