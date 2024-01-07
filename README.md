@@ -1,9 +1,9 @@
 # µProxy
-A minimal, memory-efficient HTTP(S)/SOCKS4(a) proxy server designed to run in memory-constraint environments.\
+A minimal, memory-efficient HTTP/HTTPS/SOCKS4/SOCKS5 proxy server designed to run in memory-constraint environments.\
 Originally written for MicroPython, now compatible with CPython.
 
 ## Features
-* HTTP/HTTPS protocol (GET/POST/CONNECT/...)
+* HTTP(S) protocol (GET/POST/CONNECT/...)
 * SOCKS4(a) protocol (CONNECT/BIND)
 * SOCKS5(h) protocol (CONNECT/BIND/UDP_ASSOCIATE)
 * Maximum connection limit
