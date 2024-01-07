@@ -126,7 +126,8 @@ class UDPStream:
 
     def getsockname(self):
         return self._transport.get_extra_info('sockname')
-uproxy.socks5.UDPStream = UDPStream
+if hasattr(uproxy, 'socks5'):
+    uproxy.socks5.UDPStream = UDPStream
 
 async def _create_endpoint(lhost=None, lport=None, rhost=None, rport=None, backlog=10):
     loop = asyncio.get_event_loop()
@@ -140,7 +141,8 @@ async def _create_endpoint(lhost=None, lport=None, rhost=None, rport=None, backl
     ss.ra = raddr
     ss.la = laddr
     return ss, ss
-uproxy.socks5._create_endpoint = _create_endpoint
+if hasattr(uproxy, 'socks5'):
+    uproxy.socks5._create_endpoint = _create_endpoint
 
 def limit_conns(self):
     if not self.maxconns or self.maxconns<=0:

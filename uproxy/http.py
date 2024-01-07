@@ -23,10 +23,14 @@ async def send_http_response(ss, code, desc="", headers=[], body=None):
         await ss_ensure_close(ss)
         raise err
 
-class uHTTP(core.uProxy):
+class uHTTP(core.uProxy, Exception):
     """
     HTTP(S) Proxy server class for uProxy
     """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if hasattr(kwargs, 'auth') and kwargs['auth']:
+            self.auth = b'Basic '+b64(kwargs['auth'], True)
 
     async def _handshake(self, cr, cw):
         """
@@ -34,16 +38,10 @@ class uHTTP(core.uProxy):
         """
         src_ip, src_port = core.ss_get_peername(cr)
 
-        #
-        # Parse proxy request command
-        # * remove 'http://' prefix
-        # * seperate path from url
-        # * seperate port from url (if any)
-        #
+        # parse request
         try:
             cmd = await cr.readline() # first line
-            if not cmd:
-                raise Exception("empty response")
+            assert cmd, "empty response"
             cmd = cmd.replace(b'\r\n', b'\n')
 
             method, url, proto = cmd.split(b' ') # `proto` ends with b'\n'
@@ -58,6 +56,7 @@ class uHTTP(core.uProxy):
             dst_port = int(bytes(mv[k+1:j])) if k!=-1 else 80
             domain = mv[i:k] if k!=-1 else domain
             dst_ip = str(domain, 'ascii')  # placeholder, not a real ip
+
         except Exception as err:
             self._log(core.LOG_INFO, "└─error, %s" % repr(err))
             await core.ss_ensure_close(cw)
@@ -66,12 +65,15 @@ class uHTTP(core.uProxy):
         #
         # Access control
         #
-        if self.acl_callback and not self.acl_callback(src_ip, src_port, dst_ip, dst_port):
+        if self.acl_callback and \
+        not self.acl_callback(src_ip, src_port, dst_ip, dst_port):
             await core.ss_ensure_close(cw)
-            self._log(core.LOG_INFO, "BLOCK %s:%d --> %s:%d" % (src_ip, src_port, dst_ip, dst_port))
+            self._log(core.LOG_INFO, "BLOCK %s:%d --> %s:%d" % (
+                src_ip, src_port, dst_ip, dst_port))
             return None, None
         else:
-            self._log(core.LOG_INFO, "%s\t%s:%d\t==>\t%s:%d" % (method.decode(), src_ip, src_port, dst_ip, dst_port))
+            self._log(core.LOG_INFO, "%s\t%s:%d\t==>\t%s:%d" % (
+                method.decode(), src_ip, src_port, dst_ip, dst_port))
 
         #
         # Parse proxy request HTTP headers
@@ -80,7 +82,9 @@ class uHTTP(core.uProxy):
         try:
             dst_ip = self.upstream_ip if self.upstream_ip else dst_ip
             dst_port = self.upstream_port if self.upstream_ip else dst_port
-            rr, rw = await core._open_connection(dst_ip, dst_port, local_addr=self.bind)
+            rr, rw = await core._open_connection(dst_ip,
+                                                dst_port,
+                                                local_addr=self.bind)
 
             is_auth = not self.auth
             first = True
@@ -105,12 +109,15 @@ class uHTTP(core.uProxy):
                     if method==b'CONNECT':
                         # CONNECT
                         if last:
-                            await send_http_response(cw, 200, b'Connection established', [b'Proxy-Agent: uProxy/%0.1f' % core.VERSION])
+                            await send_http_response(cw, 200,
+                                b'Connection established',
+                                [b'Proxy-Agent: uProxy/%0.1f' % core.VERSION])
                     else:
                         # GET/POST/HEAD/OPTION...
                         if first:
                             first = False
-                            rw.write(b'%s %s %s' % (method, bytes(path), proto))
+                            rw.write(b'%s %s %s' % (
+                                method, bytes(path), proto))
                         # strip proxy header
                         rw.write(mv[6:] if mv[:6] == b'Proxy-' else mv)
 

@@ -174,7 +174,7 @@ class uProxy:
         self.acl_callback = acl_callback
         self._conns = 0                   # current connection count
         self._polling = True              # server socket polling availability
-        self.auth = b'Basic '+b64(auth, True) if auth else None
+        self.auth = auth
         try:
             self.upstream_ip, self.upstream_port = upstream.strip().split(':')
             self.upstream_port = int(self.upstream_port)
@@ -182,7 +182,11 @@ class uProxy:
             self.upstream_ip = self.upstream_port = None
 
     async def run(self):
-        self._server = await _start_server(self._accept_conn, self.ip, self.port, backlog=self.backlog, ssl=self.ssl)
+        self._server = await _start_server(
+            self._accept_conn,
+            self.ip, self.port,
+            backlog=self.backlog,
+            ssl=self.ssl)
         self._log(LOG_INFO, "Listening on %s:%d" % (self.ip, self.port))
         await self._server.wait_closed()
 
@@ -238,7 +242,8 @@ class uProxy:
                         reader = cr if so==cr.s else rr
                         writer = rw if so==cr.s else cw
 
-                        n = await asyncio.wait_for(reader.readinto(mv), timeout=self.timeout)
+                        n = await asyncio.wait_for(
+                            reader.readinto(mv), timeout=self.timeout)
                         if n<=0:
                             done = True # remote close socket
                             break
@@ -255,7 +260,8 @@ class uProxy:
                     break
 
                 await asyncio.sleep_ms(0)
-                if max_ticks and time.ticks_diff(time.ticks_ms(), start)>max_ticks:
+                if max_ticks \
+                and time.ticks_diff(time.ticks_ms(), start)>max_ticks:
                     raise asyncio.TimeoutError("custom")
 
         except Exception as err:
@@ -279,7 +285,8 @@ class uProxy:
             mv = memoryview(buf)
             try:
                 while True:
-                    n = await asyncio.wait_for(r.readinto(mv), timeout=self.timeout)
+                    n = await asyncio.wait_for(
+                        r.readinto(mv), timeout=self.timeout)
                     if n<=0:
                         break
                     w.write(mv[:n])
