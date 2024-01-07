@@ -104,10 +104,12 @@ class uSOCKS5(core.uProxy):
             except:
                 pass
             mute = True
+            await asyncio.sleep(1) # close
             await core.ss_ensure_close(cw)
             await core.ss_ensure_close(rw)
 
         async def relay_udp(cr,cw, rr,rw):
+            nonlocal mute
             ca = ra = None
             src_ip, _ = core.ss_get_peername(cr)
             dst_ip = None
@@ -115,7 +117,7 @@ class uSOCKS5(core.uProxy):
                 while True:
                     # verify incoming udp pkt
                     buf, addr = await asyncio.wait_for(rr.recvfrom(self.bufsize), timeout=self.timeout)
-                    ip, port = core.addr_decode(addr)
+                    ip, port = core.ss_addr_decode(addr)
 
                     if ip==src_ip:
                         # unwrap incoming client udp pkt and send it to remote
@@ -146,7 +148,7 @@ class uSOCKS5(core.uProxy):
                         # unwrap and forward
                         data = mv[p:]
                         ra = socket.getaddrinfo(dst_ip, dst_port)[0][-1]
-                        dst_ip, dst_port = core.addr_decode(ra)
+                        dst_ip, dst_port = core.ss_addr_decode(ra)
                         n = rw.sendto(data, ra)
                         assert n==len(data), 'sendto() failed'
 

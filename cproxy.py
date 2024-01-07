@@ -6,6 +6,7 @@
 import sys
 import asyncio
 import time
+import socket
 import uproxy
 from uproxy.core import VERSION, LOG_NONE, LOG_INFO, LOG_DEBUG
 
@@ -35,6 +36,10 @@ async def readinto(self, buf):
     return len(b)
 asyncio.StreamReader.readinto = readinto
 
+def ss_addr_decode(addr):
+    return addr
+uproxy.core.ss_addr_decode = ss_addr_decode
+
 def ss_get_peername(ss):
     return ss._transport.get_extra_info('peername')
 uproxy.core.ss_get_peername = ss_get_peername
@@ -57,6 +62,85 @@ def b64(text, enc=True):
     else:
         return b64decode(text.encode("ascii"))
 uproxy.core.b64 = b64
+
+class SocketProtocol:
+    """
+    Authoer: Erik Moqvist
+    https://github.com/eerimoq/asyncudp/tree/main
+    """
+
+    def __init__(self, packets_queue_max_size):
+        self._error = None
+        self._packets = asyncio.Queue(packets_queue_max_size)
+
+    def connection_made(self, transport):
+        pass
+
+    def connection_lost(self, transport):
+        self._packets.put_nowait(None)
+        pass
+
+    def datagram_received(self, data, addr):
+        self._packets.put_nowait((data, addr))
+
+    def error_received(self, exc):
+        self._error = exc
+        self._packets.put_nowait(None)
+
+    async def recvfrom(self):
+        return await self._packets.get()
+
+    def raise_if_error(self):
+        if self._error is None:
+            return
+        error = self._error
+        self._error = None
+        raise error
+
+class UDPStream:
+    def __init__(self, transport, protocol):
+        self._transport = transport
+        self._protocol = protocol
+
+    def close(self):
+        pass
+
+    async def wait_closed(self):
+        self._transport.close()
+
+    def sendto(self, buf, addr=None):
+        if not self.ra:
+            self.ra = addr
+        if not addr:
+            addr = self.ra
+        self._transport.sendto(buf, addr)
+        self._protocol.raise_if_error()
+        return len(buf)
+
+    async def recvfrom(self, n=0):
+        packet = await self._protocol.recvfrom() # (data, (ip, port))
+        self._protocol.raise_if_error()
+        if packet is None:
+            raise Exception('recvfrom failed')
+        return packet
+
+    def getsockname(self):
+        return self._transport.get_extra_info('sockname')
+uproxy.socks5.UDPStream = UDPStream
+
+async def _create_endpoint(lhost=None, lport=None, rhost=None, rport=None, backlog=10):
+    loop = asyncio.get_event_loop()
+    laddr = None if not lhost else (lhost, lport)
+    raddr = None if not rhost else (rhost, rport)
+    transport, protocol = await loop.create_datagram_endpoint(
+        lambda: SocketProtocol(backlog),
+        local_addr=laddr, remote_addr=raddr,
+        reuse_port=True)
+    ss = UDPStream(transport, protocol)
+    ss.ra = raddr
+    ss.la = laddr
+    return ss, ss
+uproxy.socks5._create_endpoint = _create_endpoint
 
 def limit_conns(self):
     if not self.maxconns or self.maxconns<=0:
@@ -103,7 +187,7 @@ async def forward_data(self, cr,cw, rr,rw):
     await asyncio.gather(task_c2r, task_r2c, return_exceptions=False)
 
 #
-# Make CPython-compatible Classes
+# Attach global attributes
 #
 if hasattr(uproxy, 'uHTTP'):
     class uHTTP(uproxy.uHTTP):
@@ -113,6 +197,7 @@ if hasattr(uproxy, 'uHTTP'):
         _limit_conns = limit_conns
         _forward_data = forward_data
 
+    # add to global()
     globals()['uHTTP'] = uHTTP
 
 if hasattr(uproxy, 'uSOCKS4'):
@@ -123,6 +208,7 @@ if hasattr(uproxy, 'uSOCKS4'):
         _limit_conns = limit_conns
         _forward_data = forward_data
 
+    # add to global()
     globals()['uSOCKS4'] = uSOCKS4
 
 if hasattr(uproxy, 'uSOCKS5'):
@@ -133,6 +219,7 @@ if hasattr(uproxy, 'uSOCKS5'):
         _limit_conns = limit_conns
         _forward_data = forward_data
 
+    # add to global()
     globals()['uSOCKS5'] = uSOCKS5
 
 

@@ -80,7 +80,7 @@ async def _start_server(cb, host, port, backlog=100, ssl=None):
         raise er
     return srv
 
-def addr_decode(addr):
+def ss_addr_decode(addr):
     """
     Decode `addr:bytes` to `ip:str`, `port:int`
     """
@@ -96,7 +96,7 @@ def ss_get_peername(ss):
     Polyfill of `socket.getpeername()`
     @return: (ip: str, port: int)
     """
-    return addr_decode(ss.get_extra_info('peername'))
+    return ss_addr_decode(ss.get_extra_info('peername'))
 
 async def ss_ensure_close(ss):
     """
@@ -214,7 +214,7 @@ class uProxy:
             self._log(LOG_DEBUG, "polling enabled")
             self._polling = True
 
-    async def _forward_data2(self, cr,cw, rr,rw):
+    async def _forward_data(self, cr,cw, rr,rw):
         """
         Forward between client and remote
         """
@@ -265,7 +265,7 @@ class uProxy:
         await ss_ensure_close(rw)
         await ss_ensure_close(cw)
 
-    async def _forward_data(self, cr,cw, rr,rw):
+    async def _forward_data_fast(self, cr,cw, rr,rw):
         """
         This function is much faster than the default
         method but will consume twice the memory.
