@@ -80,17 +80,23 @@ async def _start_server(cb, host, port, backlog=100, ssl=None):
         raise er
     return srv
 
+def addr_decode(addr):
+    """
+    Decode `addr:bytes` to `ip:str`, `port:int`
+    """
+    import struct
+    import socket
+    mv = memoryview(addr)
+    port = struct.unpack('!H', mv[2:4])[0]
+    ip = socket.inet_ntop(socket.AF_INET, mv[4:8])
+    return ip, port
+
 def ss_get_peername(ss):
     """
     Polyfill of `socket.getpeername()`
     @return: (ip: str, port: int)
     """
-    import struct
-    import socket
-    mv = memoryview(ss.get_extra_info('peername'))
-    _, port = struct.unpack('!HH', mv[0:4])
-    ip = socket.inet_ntop(socket.AF_INET, mv[4:8])
-    return ip, port
+    return addr_decode(ss.get_extra_info('peername'))
 
 async def ss_ensure_close(ss):
     """
@@ -122,6 +128,26 @@ def randrange(a, b):
     """
     import random
     return int(random.getrandbits(16)/65535 * (b-a) + a)
+
+def get_free_port(host='0.0.0.0', af=2, proto=1, a=49152, b=65535):
+    """
+    Get available port from the system.
+    TODO: To be deprecated once micropython adds `socket.getsockname()`
+    """
+    import socket
+    so = socket.socket(af, proto)
+    for i in range(1,5):
+        try:
+            port = randrange(a, b)
+            addr = socket.getaddrinfo(host, port, af, proto)[0][-1]
+            so.bind(addr)
+            so.close()
+            return port
+        except OSError:
+            pass
+    raise IOError('no free ports')
+    return None
+
 
 
 
