@@ -46,11 +46,18 @@ class uSOCKS4(core.uProxy):
             if self.auth:
                 assert self.auth==userid, "auth failed %s:%d" % (src_ip, src_port)
 
-            # parse SOCKS4a extension
+            # SOCKS4a extension
             if dst_ip.startswith('0.0.0.') and len(s)>1:
                 dst_ip = str(s[1], 'ascii')
 
-            if cmd == 1:
+            if self.upstream_ip:
+                self._log(core.LOG_INFO, "FORWARD\t%s:%d\t==>\t%s:%d" % (src_ip, src_port, self.upstream_ip, self.upstream_port))
+                rr, rw = await core._open_connection(self.upstream_ip, self.upstream_port, local_addr=self.bind)
+                rw.write(mv[:n])
+                await rw.drain()
+                return rr, rw
+
+            elif cmd == 1:
                 # CONNECT
                 self._log(core.LOG_INFO, "CONNECT\t%s:%d\t==>\t%s:%d" % (src_ip, src_port, dst_ip, dst_port))
                 rr, rw = await core._open_connection(dst_ip, dst_port, local_addr=self.bind)
