@@ -271,40 +271,6 @@ class uProxy:
         await ss_ensure_close(rw)
         await ss_ensure_close(cw)
 
-    async def _forward_data_fast(self, cr,cw, rr,rw):
-        """
-        This function is much faster than the default
-        method but will consume twice the memory.
-        Compatible with MicroPython.
-        """
-        async def io_copy(r, w):
-            """
-            Forward data using a go-style coroutine
-            """
-            buf = bytearray(self.bufsize)
-            mv = memoryview(buf)
-            try:
-                while True:
-                    n = await asyncio.wait_for(
-                        r.readinto(mv), timeout=self.timeout)
-                    if n<=0:
-                        break
-                    w.write(mv[:n])
-                    await w.drain()
-            except Exception as err:
-                if not isinstance(err, asyncio.TimeoutError) \
-                and not (isinstance(err, OSError) and hasattr(err, 'value') and err.value==9):
-                    self._log(LOG_INFO, "└─pipe disconnect, %s" % repr(err), traceback=1)
-            await ss_ensure_close(w)
-            self._log(LOG_DEBUG, "└─pipe close", traceback=1)
-
-        t = asyncio.current_task()
-        task_c2r = asyncio.create_task(io_copy(cr, rw))
-        task_c2r._parent = t
-        task_r2c = asyncio.create_task(io_copy(rr, cw))
-        task_r2c._parent = t
-        await asyncio.gather(task_c2r, task_r2c, return_exceptions=False)
-
     async def _handshake(self, cr, cw):
         """ placeholder """
         return None, None
