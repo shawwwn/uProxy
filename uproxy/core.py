@@ -314,11 +314,17 @@ class uProxy:
         asyncio version of `connection.accept()`
         Runs on a new task
         """
+        rr = rw = 0
         self._conns += 1
         await asyncio.sleep(0)
         self._limit_conns()
         await asyncio.sleep(0)
-        rr, rw = await self._handshake(cr, cw)
+        try:
+            rr, rw = await self._handshake(cr,cw)
+        except:
+            core.ss_ensure_close(cw)
+            core.ss_ensure_close(rw)
+            rr = rw = 0
         self._conns -= 1
         await asyncio.sleep(0)
         self._limit_conns()
@@ -326,6 +332,11 @@ class uProxy:
 
         if not rr:
             return
-        await self._forward_data(cr,cw, rr,rw)
+
+        try:
+            await self._forward_data(cr,cw, rr,rw)
+        except:
+            core.ss_ensure_close(cw)
+            core.ss_ensure_close(rw)
 
         self._log(LOG_DEBUG, "└─close")

@@ -50,7 +50,8 @@ def _create_endpoint(lhost=None, lport=None, rhost=None, rport=None):
     return ss, ss
 
 
-
+REQ_GRANTED = 0
+REQ_FAILURE = 1
 
 class uSOCKS5(core.uProxy):
     """
@@ -67,11 +68,6 @@ class uSOCKS5(core.uProxy):
         return data
 
     async def _send_reply(self, cr,cw, REP,ATYP=1,BND_ADDR='',BND_PORT=0):
-        """
-        REP:
-        0x00: request granted
-        0x01: general failure
-        """
         assert ATYP!=4, "ipv6 unsupported"
 
         if ATYP==3:
@@ -193,16 +189,15 @@ class uSOCKS5(core.uProxy):
             assert mv[0]==5, "wrong ver"
             nmethods = mv[1]
             methods = mv[2:2+nmethods]
-            if nmethods>2 and methods[2]==2:
-                code = 2 # username:password auth
-            elif methods[0]==0:
+            code = 255 # no acceptable method
+            if not self.auth and methods[0]==0:
                 code = 0 # no auth
-            else:
-                code = 255 # no acceptable method
+            elif self.auth and nmethods>2 and methods[2]==2:
+                code = 2 # username:password auth
             await self._send_choice(cr,cw, REP=code)
+            assert code!=255, "no acceptable auth"
 
             # authentication
-            assert code!=255, "no acceptable auth"
             if code==2:
                 n = await cr.readinto(mv)
                 assert mv[0]==1, "wrong auth ver"
@@ -213,10 +208,17 @@ class uSOCKS5(core.uProxy):
                 p += 1
                 pw = mv[p:p+pwlen]
                 crens = str(usr+b':'+pw, 'ascii')
-                is_auth = crens==self.auth
-                await self._send_choice(cr,cw, REP=not is_auth) # 0 for success
-                assert is_auth, "auth failed"
+                assert crens==self.auth, "auth failed"
+                await self._send_choice(cr,cw, REP=REQ_GRANTED)
 
+        except Exception as err:
+            self._log(core.LOG_INFO, "└─error, %s" % repr(err))
+            await self._send_choice(cr,cw, REP=REQ_FAILURE)
+            await asyncio.sleep(0)
+            await core.ss_ensure_close(cw)
+            return None, None
+
+        try:
             # parse request
             n = await cr.readinto(mv)
             assert mv[0]==5 and mv[2]==0, "wrong ver"
@@ -232,16 +234,15 @@ class uSOCKS5(core.uProxy):
                 dst_ip = str(mv[5:p], 'ascii') # domain
                 dst_port = struct.unpack('!H', mv[p:p+2])[0]
             else:
-                await self._send_reply(cr,cw, REP=1)
-                raise Exception("invalid request")
+                raise Exception("invalid atyp")
 
             if cmd == 1:
                 # CONNECT
                 self._log(core.LOG_INFO, "CONNECT\t%s:%d\t==>\t%s:%d" % (src_ip, src_port, dst_ip, dst_port))
                 rr, rw = await core._open_connection(dst_ip, dst_port, local_addr=self.bind)
                 bnd_ip = self.ip
-                bnd_port = 0 # TODO: until micropython implements a method to get ip and port from a socket
-                await self._send_reply(cr,cw, REP=0, BND_ADDR=bnd_ip, BND_PORT=bnd_port)
+                bnd_port = 0 # TODO: needs micropython to implement a way to get ip and port from a socket
+                await self._send_reply(cr,cw, REP=REQ_GRANTED, BND_ADDR=bnd_ip, BND_PORT=bnd_port)
 
             elif cmd == 2:
                 # BIND
@@ -259,43 +260,34 @@ class uSOCKS5(core.uProxy):
                     bnd_port = core.get_free_port(proto=socket.SOCK_DGRAM)
                     srv = await core._start_server(bind_accept, self.ip, bnd_port, backlog=self.backlog) # get a random port
                     self._log(core.LOG_DEBUG, "BIND\tlisten on\t\t<==\t%s:%d" % (self.ip, bnd_port))
-                    await self._send_reply(cr,cw, REP=0, BND_ADDR=0, BND_PORT=bnd_port) # INADDR_ANY
+                    await self._send_reply(cr,cw, REP=REQ_GRANTED, BND_ADDR=0, BND_PORT=bnd_port) # INADDR_ANY
 
-                    # wait for bind's connection
+                    # wait for incoming connection
                     await asyncio.wait_for(ready.wait(), timeout=self.timeout)
                     bnd_ip, bnd_port = core.ss_get_peername(rr) # set via `bind_accept()`
                     assert bnd_ip==dst_ip, 'ip mismatch'
                     self._log(core.LOG_INFO, "BIND\t%s:%d\t<==\t%s:%d" % (src_ip, src_port, bnd_ip, bnd_port))
-                    await self._send_reply(cr,cw, REP=0, BND_ADDR=bnd_ip, BND_PORT=bnd_port)
+                    await self._send_reply(cr,cw, REP=REQ_GRANTED, BND_ADDR=bnd_ip, BND_PORT=bnd_port)
 
-                except asyncio.TimeoutError:
-                    await core.ss_ensure_close(srv)
                 except Exception as er:
-                    await self._send_reply(cr,cw, REP=1)
                     await core.ss_ensure_close(srv)
                     raise er
 
             elif cmd == 3:
                 # UDP_ASSOCIATE
-                try:
-                    # udp listen
-                    bnd_port = core.get_free_port(af=socket.AF_INET, proto=socket.SOCK_DGRAM)
-                    rr, rw =  await _create_endpoint(lhost=self.ip, lport=bnd_port) # get a random port
-                    self._log(core.LOG_INFO, "UDP ASSOCIATE\tstart at\t\t<==\t%s:%d" % (self.ip, bnd_port))
-                    await self._send_reply(cr,cw, REP=0, BND_ADDR=0, BND_PORT=bnd_port) # INADDR_ANY
-
-                except Exception as err:
-                    await self._send_reply(cr,cw, REP=1)
-                    raise err
-
-                return rr, rw
+                bnd_port = core.get_free_port(af=socket.AF_INET, proto=socket.SOCK_DGRAM)
+                rr, rw =  await _create_endpoint(lhost=self.ip, lport=bnd_port) # get a random port
+                self._log(core.LOG_INFO, "UDP ASSOCIATE\tstart at\t\t<==\t%s:%d" % (self.ip, bnd_port))
+                await self._send_reply(cr,cw, REP=REQ_GRANTED, BND_ADDR=0, BND_PORT=bnd_port) # INADDR_ANY
 
             else:
-                await core.ss_ensure_close(cw)
+                raise Exception("unknown cmd")
                 return None, None
 
         except Exception as err:
             self._log(core.LOG_INFO, "└─error, %s" % repr(err))
+            await self._send_reply(cr,cw, REP=REQ_FAILURE)
+            await asyncio.sleep(0)
             await core.ss_ensure_close(cw)
             await core.ss_ensure_close(rw)
             return None, None
@@ -307,11 +299,17 @@ class uSOCKS5(core.uProxy):
         asyncio version of `connection.accept()`
         Runs on a new task
         """
+        rr = rw = 0
         self._conns += 1
         await asyncio.sleep(0)
         self._limit_conns()
         await asyncio.sleep(0)
-        rr, rw = await self._handshake(cr, cw)
+        try:
+            rr, rw = await self._handshake(cr,cw)
+        except:
+            core.ss_ensure_close(cw)
+            core.ss_ensure_close(rw)
+            rr = rw = 0
         self._conns -= 1
         await asyncio.sleep(0)
         self._limit_conns()
@@ -319,9 +317,14 @@ class uSOCKS5(core.uProxy):
 
         if not rr:
             return
-        if isinstance(rr, UDPStream):
-            await self._relay_data(cr,cr, rr,rw)
-        else:
-            await self._forward_data(cr,cw, rr,rw)
+
+        try:
+            if isinstance(rr, UDPStream):
+                await self._relay_data(cr,cr, rr,rw)
+            else:
+                await self._forward_data(cr,cw, rr,rw)
+        except:
+            core.ss_ensure_close(cw)
+            core.ss_ensure_close(rw)
 
         self._log(core.LOG_DEBUG, "└─close")
