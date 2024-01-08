@@ -188,11 +188,11 @@ class uSOCKS5(core.uProxy):
             # choose auth method
             assert mv[0]==5, "wrong ver"
             nmethods = mv[1]
-            methods = mv[2:2+nmethods]
+            methods = [c for c in mv[2:2+nmethods]]
             code = 255 # no acceptable method
-            if not self.auth and methods[0]==0:
+            if not self.auth and 0 in methods:
                 code = 0 # no auth
-            elif self.auth and nmethods>2 and methods[2]==2:
+            elif self.auth and 2 in methods:
                 code = 2 # username:password auth
             await self._send_choice(cr,cw, REP=code)
             assert code!=255, "no acceptable auth"
@@ -200,6 +200,7 @@ class uSOCKS5(core.uProxy):
             # authentication
             if code==2:
                 n = await cr.readinto(mv)
+                assert n!=0, "no reply"
                 assert mv[0]==1, "wrong auth ver"
                 usrlen = mv[1]
                 p = 2+usrlen
@@ -221,6 +222,7 @@ class uSOCKS5(core.uProxy):
         try:
             # parse request
             n = await cr.readinto(mv)
+            assert n!=0, "no reply"
             assert mv[0]==5 and mv[2]==0, "wrong ver"
             cmd = mv[1]
             atyp = mv[3]
