@@ -1,4 +1,4 @@
-# SOCKS4 proxy for uproxy module
+# SOCKS5 proxy for uproxy module
 # Copyright (c) 2023 Shawwwn <shawwwn1@gmail.com>
 # License: MIT
 
@@ -50,6 +50,7 @@ def _create_endpoint(lhost=None, lport=None, rhost=None, rport=None):
     return ss, ss
 
 
+
 REQ_GRANTED = 0
 REQ_FAILURE = 1
 
@@ -58,11 +59,11 @@ class uSOCKS5(core.uProxy):
     SOCKS5(h) Proxy server class for uProxy
     """
 
-    async def _send_choice(self, cr,cw, REP):
+    async def _send_choice(self, cr,cw, REP,VER=5):
         """
         REP is a single-byte reply
         """
-        data = struct.pack('!BB', 5,REP)
+        data = struct.pack('!BB', VER,REP)
         cw.write(data)
         await cw.drain()
         return data
@@ -70,14 +71,14 @@ class uSOCKS5(core.uProxy):
     async def _send_reply(self, cr,cw, REP,ATYP=1,BND_ADDR='',BND_PORT=0):
         assert ATYP!=4, "ipv6 unsupported"
 
+        data = ''
         if ATYP==3:
             addrlen = len(BND_ADDR)
+            data = struct.pack('!BBsBB%dsH' % addrlen, 5,REP,b'\0',ATYP,addrlen,BND_ADDR,BND_PORT)
         else:
             BND_ADDR = socket.inet_pton(socket.AF_INET, BND_ADDR) if BND_ADDR else b'\0\0\0\0' # to 4 bytes
-            addrlen = 4
+            data = struct.pack('!BBsB4sH', 5,REP,b'\0',ATYP,BND_ADDR,BND_PORT)
 
-        fmt = '!BBsB%dsH' % addrlen
-        data = struct.pack(fmt, 5,REP,b'\0',ATYP,BND_ADDR,BND_PORT)
         cw.write(data)
         await cw.drain()
         return data
@@ -94,7 +95,7 @@ class uSOCKS5(core.uProxy):
             nonlocal mute
             try:
                 while True:
-                    d = await cr.read(0)
+                    d = await cr.read(-1)
                     if len(d)==0:
                         break
             except:
@@ -108,51 +109,69 @@ class uSOCKS5(core.uProxy):
             nonlocal mute
             ca = ra = None
             src_ip, _ = core.ss_get_peername(cr)
-            dst_ip = None
+            src_port = None
+            dst_ip = dst_port = None
+            ur = uw = None # tcp to upstream
+
+            if self.upstream_ip:
+                dst_ip = rr.upstream_bnd_ip
+                dst_port = rr.upstream_bnd_port
+                ra = socket.getaddrinfo(rr.upstream_bnd_ip, rr.upstream_bnd_port)[0][-1]
+                ur, uw = rr.ur, rr.uw
+
             try:
                 while True:
                     # verify incoming udp pkt
                     buf, addr = await asyncio.wait_for(rr.recvfrom(self.bufsize), timeout=self.timeout)
                     ip, port = core.ss_addr_decode(addr)
+                    data = None
 
-                    if ip==src_ip:
-                        # unwrap incoming client udp pkt and send it to remote
-                        ca = addr
+                    if ip==src_ip and (True if not ca else port==src_port):
+                        # client pkt
+                        if not ca:
+                            ca = addr
+                            src_port = port
 
-                        # parser pkt header
-                        p = 0
-                        mv = memoryview(buf)
-                        if mv[0:2]!=b'\0\0':
-                            continue # invalid pkt
-                        frag = mv[2]
-                        if frag!=0:
-                            continue # TODO: add udp frag support
-                        atyp = mv[3]
-                        if atyp==1:
-                            dst_ip = socket.inet_ntop(socket.AF_INET, mv[4:8])
-                            dst_port = struct.unpack('!H', mv[8:10])[0]
-                            p = 10
-                        elif atyp==3:
-                            addrlen = mv[4]
-                            p = 5+addrlen
-                            dst_ip = str(mv[5:p], 'ascii') # domain
-                            dst_port = struct.unpack('!H', mv[p:p+2])[0]
-                            p += 2
-                        if not dst_ip or not dst_port:
-                            continue # invalid dst addr
+                        if not self.upstream_ip:
+                            # parse header
+                            p = 0
+                            mv = memoryview(buf)
+                            if mv[0:2]!=b'\0\0':
+                                continue # invalid pkt
+                            frag = mv[2]
+                            if frag!=0:
+                                continue # TODO: add udp frag support
+                            atyp = mv[3]
+                            if atyp==1:
+                                dst_ip = socket.inet_ntop(socket.AF_INET, mv[4:8])
+                                dst_port = struct.unpack('!H', mv[8:10])[0]
+                                p = 10
+                            elif atyp==3:
+                                addrlen = mv[4]
+                                p = 5+addrlen
+                                dst_ip = str(mv[5:p], 'ascii') # domain
+                                dst_port = struct.unpack('!H', mv[p:p+2])[0]
+                                p += 2
+                            if not dst_ip or not dst_port:
+                                continue # invalid dst addr
 
-                        # unwrap and forward
-                        data = mv[p:]
-                        ra = socket.getaddrinfo(dst_ip, dst_port)[0][-1]
-                        dst_ip, dst_port = core.ss_addr_decode(ra)
+                            data = mv[p:] # unwrap
+                            ra = socket.getaddrinfo(dst_ip, dst_port)[0][-1]
+                            dst_ip, dst_port = core.ss_addr_decode(ra)
+                        else:
+                            data = buf
+
                         n = rw.sendto(data, ra)
                         assert n==len(data), 'sendto() failed'
 
                     elif ip==dst_ip:
-                        # wrap incoming remote udp pkt and send it to client
-                        buf = b'\0\0\0\x01\0\0\0\0\0\0'+buf
-                        n = rw.sendto(buf, ca)
-                        assert n==len(buf), 'sendto() failed'
+                        # remote pkt
+                        if not self.upstream_ip:
+                            data = b'\0\0\0\x01\0\0\0\0\0\0'+buf # wrap
+                        else:
+                            data = buf
+                        n = rw.sendto(data, ca)
+                        assert n==len(data), 'sendto() failed'
 
                     else:
                         continue # drop pkt
@@ -163,15 +182,19 @@ class uSOCKS5(core.uProxy):
                 not mute and self._log(core.LOG_INFO, "└─error, %s" % repr(err), traceback=1)
             await core.ss_ensure_close(rw)
             await core.ss_ensure_close(cw)
+            await core.ss_ensure_close(uw)
 
-        t_waittcp = asyncio.create_task(wait_tcp(cr,cw, rr,rw))
-        t_waittcp.parent = t
-        t_relayudp = asyncio.create_task(relay_udp(cr,cw, rr,rw))
-        t_relayudp.parent = t
-        await asyncio.gather(t_waittcp,t_relayudp, return_exceptions=False)
+        tasks = [
+            asyncio.create_task(wait_tcp(cr,cw, rr,rw)),
+            asyncio.create_task(relay_udp(cr,cw, rr,rw))]
+        if self.upstream_ip:
+            tasks.append(asyncio.create_task(wait_tcp(rr.ur,rr.uw, rr,rw)))
+        for task in tasks:
+            task.parent = t
+        await asyncio.gather(*tasks, return_exceptions=False)
         await core.ss_ensure_close(rw)
         await core.ss_ensure_close(cw)
-        return
+        await core.ss_ensure_close(uw)
 
     async def _handshake(self, cr,cw):
         """
@@ -179,11 +202,29 @@ class uSOCKS5(core.uProxy):
         """
         src_ip, src_port = core.ss_get_peername(cr)
         rr = rw = None
+        res = mv_res = task_upstream = None # for upstream uses
+
+        async def get_response_into(rr,rw, req, res):
+            """
+            Send request and get response
+            """
+            try:
+                rw.write(req)
+                await rw.drain()
+                return await rr.readinto(res)
+            except:
+                return 0
 
         try:
-            buf = bytearray(self.bufsize if self.bufsize>257 else 512)
+            buf = bytearray(self.bufsize)
             mv = memoryview(buf)
             n = await cr.readinto(mv)
+
+            if self.upstream_ip:
+                res = bytearray(self.bufsize)
+                mv_res = memoryview(res)
+                rr, rw = await core._open_connection(self.upstream_ip, self.upstream_port, local_addr=self.bind)
+                task_upstream = asyncio.create_task(get_response_into(rr,rw, mv[:n], mv_res)) # forward upstream
 
             # choose auth method
             assert mv[0]==5, "wrong ver"
@@ -194,29 +235,49 @@ class uSOCKS5(core.uProxy):
                 code = 0 # no auth
             elif self.auth and 2 in methods:
                 code = 2 # username:password auth
+            assert code!=255, "no auth"
+            if self.upstream_ip:
+                n_res = await asyncio.wait_for(task_upstream, timeout=self.timeout)
+                assert n_res!=0, 'upstream down'
+                assert mv_res[0]==5 and mv_res[1]==code, 'upstream no auth'
             await self._send_choice(cr,cw, REP=code)
-            assert code!=255, "no acceptable auth"
-
-            # authentication
-            if code==2:
-                n = await cr.readinto(mv)
-                assert n!=0, "no reply"
-                assert mv[0]==1, "wrong auth ver"
-                usrlen = mv[1]
-                p = 2+usrlen
-                usr = mv[2:p]
-                pwlen = mv[p]
-                p += 1
-                pw = mv[p:p+pwlen]
-                crens = str(b'%s:%s' % (usr,pw), 'ascii')
-                assert crens==self.auth, "auth failed"
-                await self._send_choice(cr,cw, REP=REQ_GRANTED)
 
         except Exception as err:
             self._log(core.LOG_INFO, "└─error, %s" % repr(err))
             await self._send_choice(cr,cw, REP=REQ_FAILURE)
             await asyncio.sleep(0)
             await core.ss_ensure_close(cw)
+            await core.ss_ensure_close(rw)
+            return None, None
+
+        try:
+            # authentication
+            if code==2:
+                n = await cr.readinto(mv)
+                assert n!=0, "no reply"
+                assert mv[0]==1, "wrong auth ver"
+                if self.upstream_ip:
+                    task_upstream = asyncio.create_task(get_response_into(rr,rw, mv[:n], mv_res))
+                usrlen = mv[1]
+                p = 2+usrlen
+                usr = mv[2:p]
+                pwlen = mv[p]
+                p += 1
+                pw = mv[p:p+pwlen]
+                crens = str(usr,'ascii')+':'+str(pw,'ascii')
+                assert crens==self.auth, "auth failed"
+                if self.upstream_ip:
+                    n_res = await asyncio.wait_for(task_upstream, timeout=self.timeout)
+                    assert n_res!=0, 'upstream down'
+                    assert mv_res[0]==1 and mv_res[1]==0, 'upstream auth failed'
+                await self._send_choice(cr,cw, VER=1,REP=REQ_GRANTED)
+
+        except Exception as err:
+            self._log(core.LOG_INFO, "└─error, %s" % repr(err))
+            await self._send_choice(cr,cw, VER=1,REP=REQ_FAILURE)
+            await asyncio.sleep(0)
+            await core.ss_ensure_close(cw)
+            await core.ss_ensure_close(rw)
             return None, None
 
         try:
@@ -238,7 +299,38 @@ class uSOCKS5(core.uProxy):
             else:
                 raise Exception("invalid atyp")
 
-            if cmd == 1:
+            if self.upstream_ip:
+                # forward to upstream server
+                if cmd!=3:
+                    self._log(core.LOG_INFO, "FORWARD\t%s:%d\t==>\t%s:%d" % (src_ip, src_port, self.upstream_ip, self.upstream_port))
+                    rw.write(mv[:n])
+                    await rw.drain()
+                else:
+                    n_res = await get_response_into(rr,rw, mv[:n], mv_res)
+                    assert n_res!=0, 'upstream down'
+                    assert mv_res[0]==5 and mv_res[1]==0 and mv_res[2]==0, 'upstream failed'
+                    atyp = mv_res[3]
+                    if atyp==1:
+                        upstream_bnd_ip = self.upstream_ip if mv_res[4:8]==b'\0\0\0\0' else socket.inet_ntop(socket.AF_INET, mv_res[4:8])
+                        upstream_bnd_port = struct.unpack('!H', mv_res[8:10])[0]
+                    elif atyp==3:
+                        addrlen = mv[4]
+                        p = 5+addrlen
+                        upstream_bnd_ip = str(mv[5:p], 'ascii') # domain
+                        upstream_bnd_port = struct.unpack('!H', mv[p:p+2])[0]
+                    else:
+                        raise Exception("upstream invalid atyp")
+                    bnd_port = core.get_free_port(af=socket.AF_INET, proto=socket.SOCK_DGRAM)
+                    ur, uw = rr, rw # tcp connection to upstream server
+                    rr, rw = await _create_endpoint(lhost=self.ip, lport=bnd_port)
+                    rr.ur, rr.uw = ur, uw
+                    rr.upstream_bnd_ip = upstream_bnd_ip
+                    rr.upstream_bnd_port = upstream_bnd_port
+                    self._log(core.LOG_INFO, "FORWARD UDP\t%s:%d\t==>\t%s:%d" % (src_ip, bnd_port, upstream_bnd_ip, upstream_bnd_port))
+                    await self._send_reply(cr,cw, REP=REQ_GRANTED, BND_ADDR=0, BND_PORT=bnd_port) # INADDR_ANY
+                return rr, rw
+
+            elif cmd == 1:
                 # CONNECT
                 self._log(core.LOG_INFO, "CONNECT\t%s:%d\t==>\t%s:%d" % (src_ip, src_port, dst_ip, dst_port))
                 rr, rw = await core._open_connection(dst_ip, dst_port, local_addr=self.bind)
@@ -260,7 +352,7 @@ class uSOCKS5(core.uProxy):
                 try:
                     # listen
                     bnd_port = core.get_free_port(proto=socket.SOCK_DGRAM)
-                    srv = await core._start_server(bind_accept, self.ip, bnd_port, backlog=self.backlog) # get a random port
+                    srv = await core._start_server(bind_accept, self.ip, bnd_port, backlog=self.backlog)
                     self._log(core.LOG_DEBUG, "BIND\tlisten on\t\t<==\t%s:%d" % (self.ip, bnd_port))
                     await self._send_reply(cr,cw, REP=REQ_GRANTED, BND_ADDR=0, BND_PORT=bnd_port) # INADDR_ANY
 
@@ -278,8 +370,8 @@ class uSOCKS5(core.uProxy):
             elif cmd == 3:
                 # UDP_ASSOCIATE
                 bnd_port = core.get_free_port(af=socket.AF_INET, proto=socket.SOCK_DGRAM)
-                rr, rw =  await _create_endpoint(lhost=self.ip, lport=bnd_port) # get a random port
-                self._log(core.LOG_INFO, "UDP ASSOCIATE\tstart at\t\t<==\t%s:%d" % (self.ip, bnd_port))
+                rr, rw =  await _create_endpoint(lhost=self.ip, lport=bnd_port)
+                self._log(core.LOG_INFO, "UDP ASSOCIATE\tstart at\t<==\t%s:%d" % (self.ip, bnd_port))
                 await self._send_reply(cr,cw, REP=REQ_GRANTED, BND_ADDR=0, BND_PORT=bnd_port) # INADDR_ANY
 
             else:
@@ -298,7 +390,6 @@ class uSOCKS5(core.uProxy):
 
     async def _accept_conn(self, cr, cw):
         """
-        asyncio version of `connection.accept()`
         Runs on a new task
         """
         rr = rw = 0
@@ -311,7 +402,7 @@ class uSOCKS5(core.uProxy):
         except:
             await core.ss_ensure_close(cw)
             await core.ss_ensure_close(rw)
-            rr = rw = 0
+            rr = rw = None
         self._conns -= 1
         await asyncio.sleep(0)
         self._limit_conns()
