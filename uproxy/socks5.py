@@ -13,7 +13,7 @@ except:
 
 from . import core
 
-class UDPStream(Stream):
+class Datagram(Stream):
     ra = None # remote address
     la = None # local address
 
@@ -43,7 +43,7 @@ def _create_endpoint(lhost=None, lport=None, rhost=None, rport=None):
         s.bind(laddr)
     if raddr:
         s.connect(raddr)
-    ss = UDPStream(s)
+    ss = Datagram(s)
     ss.ra = raddr
     ss.la = laddr
     yield asyncio.core._io_queue.queue_write(s)
@@ -208,7 +208,7 @@ class uSOCKS5(core.uProxy):
                 pwlen = mv[p]
                 p += 1
                 pw = mv[p:p+pwlen]
-                crens = str(usr+b':'+pw, 'ascii')
+                crens = str(b'%s:%s' % (usr,pw), 'ascii')
                 assert crens==self.auth, "auth failed"
                 await self._send_choice(cr,cw, REP=REQ_GRANTED)
 
@@ -309,8 +309,8 @@ class uSOCKS5(core.uProxy):
         try:
             rr, rw = await self._handshake(cr,cw)
         except:
-            core.ss_ensure_close(cw)
-            core.ss_ensure_close(rw)
+            await core.ss_ensure_close(cw)
+            await core.ss_ensure_close(rw)
             rr = rw = 0
         self._conns -= 1
         await asyncio.sleep(0)
@@ -321,12 +321,12 @@ class uSOCKS5(core.uProxy):
             return
 
         try:
-            if isinstance(rr, UDPStream):
+            if isinstance(rr, Datagram):
                 await self._relay_data(cr,cr, rr,rw)
             else:
                 await self._forward_data(cr,cw, rr,rw)
         except:
-            core.ss_ensure_close(cw)
-            core.ss_ensure_close(rw)
+            await core.ss_ensure_close(cw)
+            await core.ss_ensure_close(rw)
 
         self._log(core.LOG_DEBUG, "└─close")

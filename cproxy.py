@@ -65,10 +65,9 @@ uproxy.core.b64 = b64
 
 class SocketProtocol:
     """
-    Authoer: Erik Moqvist
+    Author: Erik Moqvist
     https://github.com/eerimoq/asyncudp/tree/main
     """
-
     def __init__(self, packets_queue_max_size):
         self._error = None
         self._packets = asyncio.Queue(packets_queue_max_size)
@@ -97,7 +96,7 @@ class SocketProtocol:
         self._error = None
         raise error
 
-class UDPStream:
+class Datagram:
     def __init__(self, transport, protocol):
         self._transport = transport
         self._protocol = protocol
@@ -109,6 +108,7 @@ class UDPStream:
         self._transport.close()
 
     def sendto(self, buf, addr=None):
+        assert self.ra or addr
         if not self.ra:
             self.ra = addr
         if not addr:
@@ -122,12 +122,9 @@ class UDPStream:
         self._protocol.raise_if_error()
         if packet is None:
             raise Exception('recvfrom failed')
+        self.ra = packet[1]
         return packet
-
-    def getsockname(self):
-        return self._transport.get_extra_info('sockname')
-if hasattr(uproxy, 'socks5'):
-    uproxy.socks5.UDPStream = UDPStream
+uproxy.socks5.Datagram = Datagram
 
 async def _create_endpoint(lhost=None, lport=None, rhost=None, rport=None, backlog=10):
     loop = asyncio.get_event_loop()
@@ -137,12 +134,11 @@ async def _create_endpoint(lhost=None, lport=None, rhost=None, rport=None, backl
         lambda: SocketProtocol(backlog),
         local_addr=laddr, remote_addr=raddr,
         reuse_port=True)
-    ss = UDPStream(transport, protocol)
+    ss = Datagram(transport, protocol)
     ss.ra = raddr
     ss.la = laddr
     return ss, ss
-if hasattr(uproxy, 'socks5'):
-    uproxy.socks5._create_endpoint = _create_endpoint
+uproxy.socks5._create_endpoint = _create_endpoint
 
 def limit_conns(self):
     if not self.maxconns or self.maxconns<=0:
