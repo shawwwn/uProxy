@@ -77,7 +77,6 @@ class uHTTP(core.uProxy, Exception):
             rr, rw = await core._open_connection(dst_ip, dst_port,
                 local_addr=self.bind)
 
-            is_auth = not self.auth
             first = True
             while line := await cr.readline():
                 line = line.replace(b'\r\n', b'\n')
@@ -85,10 +84,10 @@ class uHTTP(core.uProxy, Exception):
                 last = True if line == b'\n' else False
 
                 if mv[:20]=='Proxy-Authorization:':
-                    if self.auth and mv[21:]==self.auth:
-                        is_auth = True
+                    if self.auth and mv[21:]!=self.auth:
+                        raise Exception('unauthorized')
                     if not self.upstream_ip:
-                        continue
+                        continue # skip
 
                 if self.upstream_ip:
                     # forward all to upstream proxy
@@ -107,15 +106,11 @@ class uHTTP(core.uProxy, Exception):
                     if first:
                         first = False
                         rw.write(b'%s %s %s' % (method, bytes(path), proto))
-                    # strip proxy header
-                    rw.write(mv[6:]if mv[:6]==b'Proxy-' else mv)
+                    rw.write(mv[6:]if mv[:6]==b'Proxy-' else mv) # strip proxy header
 
                 if last:
                     await rw.drain()
                     break
-
-            if not is_auth:
-                raise Exception('unauthorized')
 
         except Exception as err:
             self._log(core.LOG_INFO, "└─error, %s" % repr(err))

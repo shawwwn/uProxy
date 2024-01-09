@@ -7,7 +7,7 @@ try:
 except:
     import asyncio
 
-VERSION = 1.0
+VERSION = 2.0
 LOG_NONE = 0
 LOG_INFO = 1
 LOG_DEBUG = 2
