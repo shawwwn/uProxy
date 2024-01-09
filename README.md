@@ -89,6 +89,8 @@ asyncio.run(proxy.run())
 
 * **`uproxy.SOCKS4(...)`**
 
+  * **auth** - an 'username' term (no colon) because socks4 does not support password
+
   Same as `uHTTP`
 
 * **`uproxy.SOCKS5(...)`**
@@ -105,11 +107,3 @@ asyncio.run(proxy.run())
 + A good set of paramters for uproxy to run in a memory-constraint environment should be `maxconns=10, backlog=5, bufsize=512, timeout=5`.
 + For detail usage, please refer to `examples/`
 
-## Todo:
-- [X] Authorization
-- [X] Forward to upstream proxy
-- [X] HTTPS server
-- [X] SOCKS4 (CONNECT/BIND)
-- [ ] SOCKS4 upstream
-- [X] SOCKS5 (CONNECT/BIND/UDP_ASSOCIATE)
-- [ ] SOCK5 upstream
