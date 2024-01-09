@@ -47,6 +47,12 @@ class uSOCKS4(core.uProxy):
             if dst_ip.startswith('0.0.0.') and len(s)>1:
                 dst_ip = str(s[1], 'ascii')
 
+            # access control
+            if self.acl_callback and not self.acl_callback(src_ip, src_port, dst_ip, dst_port):
+                await core.ss_ensure_close(cw)
+                self._log(core.LOG_INFO, "BLOCK\t%s:%d\t==>\t%s:%d" % (src_ip, src_port, dst_ip, dst_port))
+                return None, None
+
             if self.upstream_ip:
                 self._log(core.LOG_INFO, "FORWARD\t%s:%d\t==>\t%s:%d" % (src_ip, src_port, self.upstream_ip, self.upstream_port))
                 rr, rw = await core._open_connection(self.upstream_ip, self.upstream_port, local_addr=self.bind)

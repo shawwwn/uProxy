@@ -291,6 +291,12 @@ class uSOCKS5(core.uProxy):
             else:
                 raise Exception("invalid atyp")
 
+            # access control
+            if self.acl_callback and not self.acl_callback(src_ip, src_port, dst_ip, dst_port):
+                await core.ss_ensure_close(cw)
+                self._log(core.LOG_INFO, "BLOCK\t%s:%d\t==>\t%s:%d" % (src_ip, src_port, dst_ip, dst_port))
+                return None, None
+
             if self.upstream_ip:
                 # forward to upstream server
                 if cmd!=3:
