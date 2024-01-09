@@ -27,23 +27,22 @@ class uHTTP(core.uProxy, Exception):
     """
     HTTP(S) Proxy server class for uProxy
     """
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         if hasattr(kwargs, 'auth') and kwargs['auth']:
             self.auth = b'Basic '+b64(kwargs['auth'], True)
 
     async def _handshake(self, cr, cw):
-        """
-        HTTP(S) handshake
-        """
         src_ip, src_port = core.ss_get_peername(cr)
+        rr = rw = None # remote reader, remote writer
 
-        # parse request
         try:
             cmd = await cr.readline() # first line
             assert cmd, "empty response"
             cmd = cmd.replace(b'\r\n', b'\n')
 
+            # parse cmd
             method, url, proto = cmd.split(b' ') # `proto` ends with b'\n'
             mv = memoryview(url)
             i = url.find(b'://')
@@ -55,16 +54,14 @@ class uHTTP(core.uProxy, Exception):
             k = url.find(b':', i)
             dst_port = int(bytes(mv[k+1:j])) if k!=-1 else 80
             domain = mv[i:k] if k!=-1 else domain
-            dst_ip = str(domain, 'ascii')  # placeholder, not a real ip
+            dst_ip = str(domain, 'ascii') # placeholder, not a real ip
 
         except Exception as err:
             self._log(core.LOG_INFO, "└─error, %s" % repr(err))
             await core.ss_ensure_close(cw)
             return None, None
 
-        #
-        # Access control
-        #
+        # access control
         if self.acl_callback and \
         not self.acl_callback(src_ip, src_port, dst_ip, dst_port):
             await core.ss_ensure_close(cw)
@@ -75,16 +72,12 @@ class uHTTP(core.uProxy, Exception):
             self._log(core.LOG_INFO, "%s\t%s:%d\t==>\t%s:%d" % (
                 method.decode(), src_ip, src_port, dst_ip, dst_port))
 
-        #
-        # Parse proxy request HTTP headers
-        #
-        rr = rw = None # remote reader, remote writer
+        # parse http headers
         try:
             dst_ip = self.upstream_ip if self.upstream_ip else dst_ip
             dst_port = self.upstream_port if self.upstream_ip else dst_port
-            rr, rw = await core._open_connection(dst_ip,
-                                                dst_port,
-                                                local_addr=self.bind)
+            rr, rw = await core._open_connection(dst_ip, dst_port,
+                local_addr=self.bind)
 
             is_auth = not self.auth
             first = True
@@ -105,21 +98,19 @@ class uHTTP(core.uProxy, Exception):
                         first = False
                         rw.write(cmd)
                     rw.write(line)
+                elif method==b'CONNECT':
+                    # CONNECT
+                    if last:
+                        await send_http_response(cw, 200,
+                            b'Connection established',
+                            [b'Proxy-Agent: uProxy/%0.1f' % core.VERSION])
                 else:
-                    if method==b'CONNECT':
-                        # CONNECT
-                        if last:
-                            await send_http_response(cw, 200,
-                                b'Connection established',
-                                [b'Proxy-Agent: uProxy/%0.1f' % core.VERSION])
-                    else:
-                        # GET/POST/HEAD/OPTION...
-                        if first:
-                            first = False
-                            rw.write(b'%s %s %s' % (
-                                method, bytes(path), proto))
-                        # strip proxy header
-                        rw.write(mv[6:] if mv[:6] == b'Proxy-' else mv)
+                    # GET/POST/HEAD/OPTION...
+                    if first:
+                        first = False
+                        rw.write(b'%s %s %s' % (method, bytes(path), proto))
+                    # strip proxy header
+                    rw.write(mv[6:]if mv[:6]==b'Proxy-' else mv)
 
                 if last:
                     await rw.drain()

@@ -10,7 +10,6 @@ try:
 except:
     import asyncio
     class Stream: pass
-
 from . import core
 
 class Datagram(Stream):
@@ -60,9 +59,6 @@ class uSOCKS5(core.uProxy):
     """
 
     async def _send_choice(self, cr,cw, REP,VER=5):
-        """
-        REP is a single-byte reply
-        """
         data = struct.pack('!BB', VER,REP)
         cw.write(data)
         await cw.drain()
@@ -71,13 +67,14 @@ class uSOCKS5(core.uProxy):
     async def _send_reply(self, cr,cw, REP,ATYP=1,BND_ADDR='',BND_PORT=0):
         assert ATYP!=4, "ipv6 unsupported"
 
-        data = ''
         if ATYP==3:
             addrlen = len(BND_ADDR)
-            data = struct.pack('!BBsBB%dsH' % addrlen, 5,REP,b'\0',ATYP,addrlen,BND_ADDR,BND_PORT)
         else:
+            addrlen = 4
             BND_ADDR = socket.inet_pton(socket.AF_INET, BND_ADDR) if BND_ADDR else b'\0\0\0\0' # to 4 bytes
-            data = struct.pack('!BBsB4sH', 5,REP,b'\0',ATYP,BND_ADDR,BND_PORT)
+
+        data = struct.pack('!BBsB%s%dsH' % ('B' if ATYP==3 else '', addrlen),
+            5,REP,b'\0',ATYP,addrlen,BND_ADDR,BND_PORT)
 
         cw.write(data)
         await cw.drain()
@@ -85,13 +82,13 @@ class uSOCKS5(core.uProxy):
 
     async def _relay_data(self, cr,cw, rr,rw):
         """
-        Relay udp pkts between client and remote revolving `rr` endpoint
+        Relay udp pkts between client and remote around `rr` endpoint
         """
         t = asyncio.current_task()
         mute = False
 
         async def wait_tcp(cr,cw, rr,rw):
-            # monitor primary tcp connection
+            # monitor tcp connection
             nonlocal mute
             try:
                 while True:
@@ -101,7 +98,7 @@ class uSOCKS5(core.uProxy):
             except:
                 pass
             mute = True
-            await asyncio.sleep(1) # close
+            await asyncio.sleep(1)
             await core.ss_ensure_close(cw)
             await core.ss_ensure_close(rw)
 
@@ -174,7 +171,7 @@ class uSOCKS5(core.uProxy):
                         assert n==len(data), 'sendto() failed'
 
                     else:
-                        continue # drop pkt
+                        continue # drop
 
             except asyncio.TimeoutError:
                 pass
@@ -197,17 +194,12 @@ class uSOCKS5(core.uProxy):
         await core.ss_ensure_close(uw)
 
     async def _handshake(self, cr,cw):
-        """
-        SOCKS5(h) handshake
-        """
         src_ip, src_port = core.ss_get_peername(cr)
         rr = rw = None
         res = mv_res = task_upstream = None # for upstream uses
 
         async def get_response_into(rr,rw, req, res):
-            """
-            Send request and get response
-            """
+            """Send request and get response"""
             try:
                 rw.write(req)
                 await rw.drain()
@@ -389,20 +381,12 @@ class uSOCKS5(core.uProxy):
         return rr, rw
 
     async def _accept_conn(self, cr, cw):
-        """
-        Runs on a new task
-        """
         rr = rw = 0
         self._conns += 1
         await asyncio.sleep(0)
         self._limit_conns()
         await asyncio.sleep(0)
-        try:
-            rr, rw = await self._handshake(cr,cw)
-        except:
-            await core.ss_ensure_close(cw)
-            await core.ss_ensure_close(rw)
-            rr = rw = None
+        rr, rw = await self._handshake(cr,cw)
         self._conns -= 1
         await asyncio.sleep(0)
         self._limit_conns()
@@ -411,13 +395,9 @@ class uSOCKS5(core.uProxy):
         if not rr:
             return
 
-        try:
-            if isinstance(rr, Datagram):
-                await self._relay_data(cr,cr, rr,rw)
-            else:
-                await self._forward_data(cr,cw, rr,rw)
-        except:
-            await core.ss_ensure_close(cw)
-            await core.ss_ensure_close(rw)
+        if isinstance(rr, Datagram):
+            await self._relay_data(cr,cr, rr,rw)
+        else:
+            await self._forward_data(cr,cw, rr,rw)
 
         self._log(core.LOG_DEBUG, "└─close")

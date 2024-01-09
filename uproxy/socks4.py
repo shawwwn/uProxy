@@ -26,9 +26,6 @@ class uSOCKS4(core.uProxy):
         return data
 
     async def _handshake(self, cr,cw):
-        """
-        SOCKS4(a) handshake
-        """
         src_ip, src_port = core.ss_get_peername(cr)
         rr = rw = None
 
@@ -42,8 +39,8 @@ class uSOCKS4(core.uProxy):
             cmd, dst_port = struct.unpack('!BH', mv[1:4])
             dst_ip = socket.inet_ntop(socket.AF_INET, mv[4:8])
             s = bytes(mv[8:n-1]).split(b'\0')
-            userid = str(s[0], 'ascii')
             if self.auth:
+                userid = str(s[0], 'ascii')
                 assert self.auth==userid, "auth failed %s:%d" % (src_ip, src_port)
 
             # SOCKS4a extension
@@ -57,13 +54,13 @@ class uSOCKS4(core.uProxy):
                 await rw.drain()
                 return rr, rw
 
-            elif cmd == 1:
+            elif cmd==1:
                 # CONNECT
                 self._log(core.LOG_INFO, "CONNECT\t%s:%d\t==>\t%s:%d" % (src_ip, src_port, dst_ip, dst_port))
                 rr, rw = await core._open_connection(dst_ip, dst_port, local_addr=self.bind)
                 await self._send_reply(cr,cw, REP=REQ_GRANTED)
 
-            elif cmd == 2:
+            elif cmd==2:
                 # BIND
                 srv = None
                 ready = asyncio.Event()
@@ -77,7 +74,7 @@ class uSOCKS4(core.uProxy):
                 try:
                     # listen to a random port
                     bnd_port = core.get_free_port(proto=socket.SOCK_STREAM)
-                    srv = await core._start_server(bind_accept, self.ip, bnd_port, backlog=self.backlog) # get a random port
+                    srv = await core._start_server(bind_accept, self.ip, bnd_port, backlog=self.backlog)
                     self._log(core.LOG_DEBUG, "BIND\tlisten on\t\t<==\t%s:%d" % (self.ip, bnd_port))
                     await self._send_reply(cr,cw, REP=REQ_GRANTED, DSTPORT=bnd_port, DSTIP=0) # INADDR_ANY
 

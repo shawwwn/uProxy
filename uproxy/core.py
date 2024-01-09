@@ -235,6 +235,7 @@ class uProxy:
             mv = memoryview(buf)
             done = False
             start = time.ticks_ms()
+            reader = reader = None
 
             while True:
                 for so, evt in pobj.ipoll(0):
