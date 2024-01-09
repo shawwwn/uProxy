@@ -23,7 +23,7 @@ async def send_http_response(ss, code, desc="", headers=[], body=None):
         await ss_ensure_close(ss)
         raise err
 
-class uHTTP(core.uProxy, Exception):
+class uHTTP(core.uProxy):
     """
     HTTP(S) Proxy server class for uProxy
     """
