@@ -1,14 +1,21 @@
+# Run HTTP proxy with authentication
 #
-# Run uProxy with authentication
-# Clients need to provide correct username and password to use proxy.
-# Only supports 'Basic' authentication mode for now.
+# Only supports 'Basic' auth mode for now.
 #
-# Client Reuqest:
+# Client example reuqest:
 # curl -U "kenny:p4ssw0rd" -v "https://ifconfig.me"
 #
+import sys
 
-import uasyncio as asyncio
-import uproxy
+impl = sys.implementation.name.lower()
+print(impl)
 
-proxy = uproxy.uProxy(ip='0.0.0.0', port=8765, auth='username:password')
+if impl=='cpython':
+	import asyncio
+	import cproxy as uproxy
+else:
+	import uasyncio as asyncio
+	import uproxy
+
+proxy = uproxy.uHTTP(ip='0.0.0.0', port=8765, auth='kenny:p4ssw0rd')
 asyncio.run(proxy.run())

@@ -1,10 +1,18 @@
 #
 # Access Control(ACL) Function Usage
 #
-
+import sys
 import re
-import asyncio
-import cproxy
+
+impl = sys.implementation.name.lower()
+print(impl)
+
+if impl=='cpython':
+    import asyncio
+    import cproxy as uproxy
+else:
+    import uasyncio as asyncio
+    import uproxy
 
 def my_acl(src_ip, src_port, dst_ip, dst_port):
     '''
@@ -34,5 +42,5 @@ def my_acl(src_ip, src_port, dst_ip, dst_port):
     # ALLOW all by default
     return True
 
-proxy = cproxy.uProxy(ip='0.0.0.0', , port=8765, acl_callback=my_acl)
+proxy = uproxy.uHTTP(ip='0.0.0.0', port=8765, acl_callback=my_acl)
 asyncio.run(proxy.run())
