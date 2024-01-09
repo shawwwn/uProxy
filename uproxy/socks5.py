@@ -69,12 +69,12 @@ class uSOCKS5(core.uProxy):
 
         if ATYP==3:
             addrlen = len(BND_ADDR)
+            BND_ADDR = addrlen.to_bytes(1, 'big')+bytes(BND_ADDR)
         else:
             addrlen = 4
             BND_ADDR = socket.inet_pton(socket.AF_INET, BND_ADDR) if BND_ADDR else b'\0\0\0\0' # to 4 bytes
 
-        data = struct.pack('!BBsB%s%dsH' % ('B' if ATYP==3 else '', addrlen),
-            5,REP,b'\0',ATYP,addrlen,BND_ADDR,BND_PORT)
+        data = struct.pack('!BBsB%dsH' % addrlen, 5,REP,b'\0',ATYP,BND_ADDR,BND_PORT)
 
         cw.write(data)
         await cw.drain()
