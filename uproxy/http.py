@@ -1,11 +1,7 @@
 # HTTP/HTTPS proxy for uproxy module
 # Copyright (c) 2023 Shawwwn <shawwwn1@gmail.com>
 # License: MIT
-
-try:
-    import uasyncio as asyncio
-except:
-    import asyncio
+import asyncio
 from . import core
 
 async def send_http_response(ss, code, desc="", headers=[], body=None):

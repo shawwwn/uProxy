@@ -1,13 +1,9 @@
 # SOCKS4 proxy for uproxy module
 # Copyright (c) 2023 Shawwwn <shawwwn1@gmail.com>
 # License: MIT
-
 import struct
 import socket
-try:
-    import uasyncio as asyncio
-except:
-    import asyncio
+import asyncio
 from . import core
 
 REQ_GRANTED = 90

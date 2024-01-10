@@ -1,14 +1,12 @@
 # SOCKS5 proxy for uproxy module
 # Copyright (c) 2023 Shawwwn <shawwwn1@gmail.com>
 # License: MIT
-
 import struct
 import socket
+import asyncio
 try:
-    import uasyncio as asyncio
-    from uasyncio.stream import Stream
+    from asyncio.stream import Stream
 except:
-    import asyncio
     class Stream: pass
 from . import core
 

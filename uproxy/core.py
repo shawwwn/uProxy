@@ -1,11 +1,7 @@
 # Core utility functions for uproxy module
 # Copyright (c) 2023 Shawwwn <shawwwn1@gmail.com>
 # License: MIT
-
-try:
-    import uasyncio as asyncio
-except:
-    import asyncio
+import asyncio
 
 VERSION = 2.0
 LOG_NONE = 0

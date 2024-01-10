@@ -3,7 +3,6 @@
 # License: MIT
 
 from .core import *
-# from .core import VERSION, LOG_NONE, LOG_INFO, LOG_DEBUG
 
 def __init__():
     attrs = {

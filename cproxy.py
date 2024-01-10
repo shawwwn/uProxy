@@ -4,7 +4,9 @@
 # Copyright (c) 2023 Shawwwn <shawwwn1@gmail.com>
 # License: MIT
 import sys
+sys.path.pop(0)
 import asyncio
+sys.path.insert(0, '')
 import time
 import socket
 import uproxy
