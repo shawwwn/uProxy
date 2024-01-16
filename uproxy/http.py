@@ -16,7 +16,7 @@ async def send_http_response(ss, code, desc="", headers=[], body=None):
         ss.write(b'\n')
         await ss.drain()
     except Exception as err:
-        await ss_ensure_close(ss)
+        await core.ss_ensure_close(ss)
         raise err
 
 class uHTTP(core.uProxy):
